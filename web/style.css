@@ -112,58 +112,7 @@
   font-size: 0.7rem;
 }
 
-.phg-entry-gallery {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
-  gap: 0.5rem;
-}
-
-.phg-entry-image {
-  width: 100%;
-  border-radius: 0.5rem;
-  object-fit: cover;
-  cursor: pointer;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  transition: transform 0.2s ease, border-color 0.2s ease;
-}
-
-.phg-entry-image:hover {
-  transform: scale(1.02);
-  border-color: rgba(255, 255, 255, 0.4);
-}
-
 .phg-entry-meta {
   font-size: 0.75rem;
   opacity: 0.8;
-}
-
-.phg-entry-files {
-  background: rgba(255, 255, 255, 0.06);
-  border-radius: 0.5rem;
-  padding: 0.5rem 0.6rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-}
-
-.phg-entry-files-title {
-  font-size: 0.7rem;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  opacity: 0.75;
-}
-
-.phg-file-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-
-.phg-file-item {
-  font-family: var(--p-font-family-mono, var(--p-font-family, monospace));
-  font-size: 0.75rem;
-  word-break: break-word;
 }

@@ -20,6 +20,105 @@ function ensureStylesheet() {
   document.head.appendChild(link);
 }
 
+const VIEWERJS_VERSION = "1.11.6";
+const VIEWERJS_BASE_URL = `https://cdn.jsdelivr.net/npm/viewerjs@${VIEWERJS_VERSION}/dist`;
+const VIEWERJS_CSS_URL = `${VIEWERJS_BASE_URL}/viewer.min.css`;
+const VIEWERJS_CORE_URL = `${VIEWERJS_BASE_URL}/viewer.min.js`;
+
+const externalAssetPromises = new Map();
+
+const IMAGE_EXTENSIONS = new Set([
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".gif",
+  ".bmp",
+  ".webp",
+  ".tiff",
+  ".tif",
+  ".avif",
+  ".svg",
+]);
+
+function ensureExternalStylesheet(href) {
+  if (!href) return Promise.reject(new Error("Stylesheet URL is required"));
+  const key = `style:${href}`;
+  if (externalAssetPromises.has(key)) {
+    return externalAssetPromises.get(key);
+  }
+  const existing = Array.from(
+    document.head.querySelectorAll('link[data-phg-asset]')
+  ).find((link) => link.dataset.phgAsset === href);
+  if (existing) {
+    return Promise.resolve();
+  }
+  const promise = new Promise((resolve, reject) => {
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = href;
+    link.dataset.phgAsset = href;
+    link.addEventListener("load", () => resolve());
+    link.addEventListener("error", () =>
+      reject(new Error(`Failed to load stylesheet: ${href}`))
+    );
+    document.head.appendChild(link);
+  });
+  externalAssetPromises.set(key, promise);
+  return promise;
+}
+
+function ensureExternalScript(src) {
+  if (!src) return Promise.reject(new Error("Script URL is required"));
+  const key = `script:${src}`;
+  if (externalAssetPromises.has(key)) {
+    return externalAssetPromises.get(key);
+  }
+  const existing = Array.from(
+    document.head.querySelectorAll('script[data-phg-asset]')
+  ).find((script) => script.dataset.phgAsset === src);
+  if (existing) {
+    return existing.dataset.phgLoaded === "true"
+      ? Promise.resolve()
+      : new Promise((resolve, reject) => {
+          existing.addEventListener("load", () => resolve());
+          existing.addEventListener("error", () =>
+            reject(new Error(`Failed to load script: ${src}`))
+          );
+        });
+  }
+  const promise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = src;
+    script.async = true;
+    script.defer = false;
+    script.dataset.phgAsset = src;
+    script.addEventListener("load", () => {
+      script.dataset.phgLoaded = "true";
+      resolve();
+    });
+    script.addEventListener("error", () =>
+      reject(new Error(`Failed to load script: ${src}`))
+    );
+    document.head.appendChild(script);
+  });
+  externalAssetPromises.set(key, promise);
+  return promise;
+}
+
+let viewerLoader = null;
+async function ensureViewer() {
+  if (viewerLoader) return viewerLoader;
+  viewerLoader = (async () => {
+    await ensureExternalStylesheet(VIEWERJS_CSS_URL);
+    await ensureExternalScript(VIEWERJS_CORE_URL);
+    if (typeof window.Viewer !== "function") {
+      throw new Error("Viewer global was not found after loading assets.");
+    }
+    return window.Viewer;
+  })();
+  return viewerLoader;
+}
+
 function resolveMainBundleScript() {
   return document.querySelector(
     'script[type="module"][src*="assets/index-"]'
@@ -54,21 +153,164 @@ function resolveToastStore(module) {
 
 function buildImageSources(entry, api) {
   const result = [];
-  const images = entry?.metadata?.images;
-  if (!Array.isArray(images)) return result;
+  const seen = new Set();
 
-  for (const image of images) {
-    if (!image?.filename) continue;
+  const appendSource = (descriptor, { skipExtensionCheck = false } = {}) => {
+    if (!descriptor || !descriptor.filename) return;
+    const filename = String(descriptor.filename);
+    if (
+      !skipExtensionCheck &&
+      !isLikelyImageFilename(filename)
+    ) {
+      return;
+    }
     const params = new URLSearchParams();
-    params.set("filename", image.filename);
-    params.set("type", image.type ?? "output");
-    if (image.subfolder) params.set("subfolder", image.subfolder);
-    if (image.preview) params.set("preview", String(image.preview));
+    params.set("filename", filename);
+    const typeValue =
+      descriptor.type && String(descriptor.type).trim()
+        ? String(descriptor.type).trim()
+        : "output";
+    params.set("type", typeValue);
+    if (descriptor.subfolder) params.set("subfolder", String(descriptor.subfolder));
+    if (descriptor.preview !== undefined) {
+      params.set("preview", String(descriptor.preview));
+    }
     const path = `/view?${params.toString()}`;
     const url = api?.fileURL ? api.fileURL(path) : path;
-    result.push({ url, title: image.title ?? image.filename });
+    if (seen.has(url)) return;
+    seen.add(url);
+    const title =
+      descriptor.title !== undefined && descriptor.title !== null
+        ? String(descriptor.title)
+        : filename;
+    const thumbnailSource =
+      descriptor.thumbnail !== undefined && descriptor.thumbnail !== null
+        ? String(descriptor.thumbnail)
+        : descriptor.thumb !== undefined && descriptor.thumb !== null
+        ? String(descriptor.thumb)
+        : url;
+    result.push({ url, title, thumb: thumbnailSource });
+  };
+
+  const normalizeDescriptor = (item) => {
+    if (!item) return null;
+    if (typeof item === "string") {
+      const trimmed = item.trim();
+      if (!trimmed) return null;
+      return { filename: trimmed };
+    }
+    if (typeof item === "object") {
+      const filename = item.filename ?? item.name;
+      if (!filename) return null;
+      const descriptor = {
+        filename: String(filename),
+        subfolder:
+          item.subfolder !== undefined ? String(item.subfolder) : undefined,
+        type:
+          item.type !== undefined
+            ? String(item.type)
+            : item.kind !== undefined
+            ? String(item.kind)
+            : undefined,
+        preview: item.preview,
+      };
+      const label =
+        item.title ??
+        item.label ??
+        item.caption ??
+        item.prompt ??
+        item.name ??
+        filename;
+      if (label !== undefined && label !== null) {
+        descriptor.title = String(label);
+      }
+      const thumbnail =
+        item.thumbnail ??
+        item.thumb ??
+        item.preview_url ??
+        item.previewUrl ??
+        item.poster ??
+        item.poster_url ??
+        item.url;
+      if (thumbnail !== undefined && thumbnail !== null) {
+        descriptor.thumbnail = String(thumbnail);
+      }
+      return descriptor;
+    }
+    return null;
+  };
+
+  const isLikelyImageFilename = (name) => {
+    if (typeof name !== "string") return false;
+    const trimmed = name.trim().toLowerCase();
+    if (!trimmed) return false;
+    const index = trimmed.lastIndexOf(".");
+    if (index === -1) return false;
+    const ext = trimmed.slice(index);
+    return IMAGE_EXTENSIONS.has(ext);
+  };
+
+  const addFromCollection = (collection, options = {}) => {
+    if (!Array.isArray(collection)) return;
+    for (const item of collection) {
+      const descriptor = normalizeDescriptor(item);
+      if (!descriptor) continue;
+      appendSource(descriptor, options);
+    }
+  };
+
+  addFromCollection(entry?.metadata?.images, { skipExtensionCheck: true });
+  addFromCollection(entry?.files);
+  addFromCollection(entry?.metadata?.files);
+
+  const outputs = entry?.metadata?.outputs;
+  if (outputs && typeof outputs === "object") {
+    for (const value of Object.values(outputs)) {
+      if (Array.isArray(value)) {
+        addFromCollection(value);
+        continue;
+      }
+      if (value && typeof value === "object") {
+        for (const nested of Object.values(value)) {
+          if (Array.isArray(nested)) {
+            addFromCollection(nested);
+          }
+        }
+      }
+    }
   }
   return result;
+}
+
+const VIEWER_ROOT_ID = "phg-viewer-root";
+
+function ensureViewerRoot() {
+  if (typeof document === "undefined") return null;
+  let container = document.getElementById(VIEWER_ROOT_ID);
+  if (!container) {
+    container = document.createElement("div");
+    container.id = VIEWER_ROOT_ID;
+    container.style.display = "none";
+    container.setAttribute("aria-hidden", "true");
+    document.body.appendChild(container);
+  }
+  return container;
+}
+
+function clearViewerRoot() {
+  if (typeof document === "undefined") return;
+  const container = document.getElementById(VIEWER_ROOT_ID);
+  if (container) {
+    container.innerHTML = "";
+  }
+}
+
+function removeViewerRoot() {
+  if (typeof document === "undefined") return;
+  const container = document.getElementById(VIEWER_ROOT_ID);
+  if (container?.parentNode) {
+    container.parentNode.removeChild(container);
+  }
 }
 
 function toDateLabel(value) {
@@ -84,6 +326,7 @@ function createHistoryComponent(api, toastStore, vueHelpers, eventBus) {
     defineComponent,
     ref,
     computed,
+    nextTick,
     onMounted,
     onBeforeUnmount,
     h,
@@ -96,32 +339,34 @@ function createHistoryComponent(api, toastStore, vueHelpers, eventBus) {
       const isLoading = ref(false);
       const errorMessage = ref("");
       const limit = ref(50);
-      const expandedFiles = ref(new Set());
+      let activeViewerInstance = null;
+      let activeViewerEntryId = null;
+      let activeViewerCleanup = null;
 
       const hasEntries = computed(() => entries.value.length > 0);
 
-      const resetExpandedFiles = () => {
-        expandedFiles.value = new Set();
-      };
-
-      const toggleFiles = (entryId) => {
-        const next = new Set(expandedFiles.value);
-        if (next.has(entryId)) {
-          next.delete(entryId);
-        } else {
-          next.add(entryId);
+      const destroyActiveViewer = () => {
+        const cleanup = activeViewerCleanup;
+        activeViewerCleanup = null;
+        if (typeof cleanup === "function") {
+          cleanup(false);
+          return;
         }
-        expandedFiles.value = next;
+        if (!activeViewerInstance) {
+          activeViewerEntryId = null;
+          clearViewerRoot();
+          return;
+        }
+        const instance = activeViewerInstance;
+        activeViewerInstance = null;
+        activeViewerEntryId = null;
+        try {
+          instance.destroy();
+        } catch (error) {
+          logError("destroyActiveViewer error", error);
+        }
+        clearViewerRoot();
       };
-
-      const collapseFiles = (entryId) => {
-        if (!expandedFiles.value.has(entryId)) return;
-        const next = new Set(expandedFiles.value);
-        next.delete(entryId);
-        expandedFiles.value = next;
-      };
-
-      const isFilesVisible = (entryId) => expandedFiles.value.has(entryId);
 
       const showToast = (detail, severity = "info") => {
         toastStore?.add({
@@ -130,6 +375,112 @@ function createHistoryComponent(api, toastStore, vueHelpers, eventBus) {
           detail,
           life: 2500,
         });
+      };
+
+      const openGallery = async (entry, galleryItems, startIndex = 0) => {
+        if (!entry || !Array.isArray(galleryItems) || galleryItems.length === 0) {
+          showToast("No images available for this prompt.", "warn");
+          return;
+        }
+        try {
+          await ensureViewer();
+          await nextTick();
+          destroyActiveViewer();
+
+          const root = ensureViewerRoot();
+          if (!root) {
+            throw new Error("Unable to create viewer root element.");
+          }
+          root.innerHTML = "";
+
+          const fragment = document.createDocumentFragment();
+          galleryItems.forEach((item, index) => {
+            const image = document.createElement("img");
+            image.src = item.thumb ?? item.url;
+            image.setAttribute("data-original", item.url);
+            if (item.title) {
+              image.alt = item.title;
+              image.setAttribute("data-caption", item.title);
+            } else {
+              image.alt = "";
+            }
+            image.dataset.index = String(index);
+            image.loading = "lazy";
+            fragment.appendChild(image);
+          });
+          if (!fragment.childNodes.length) {
+            showToast("No images available for this prompt.", "warn");
+            return;
+          }
+          root.appendChild(fragment);
+
+          const safeIndex = Math.min(
+            Math.max(startIndex || 0, 0),
+            Math.max(galleryItems.length - 1, 0)
+          );
+
+          let isCleaning = false;
+          let cleanup = () => {};
+          const hiddenHandler = () => cleanup(true);
+
+          const viewer = new window.Viewer(root, {
+            navbar: true,
+            toolbar: true,
+            tooltip: true,
+            movable: true,
+            zoomable: true,
+            rotatable: true,
+            scalable: true,
+            transition: true,
+            fullscreen: true,
+            keyboard: true,
+            initialViewIndex: safeIndex,
+            url(image) {
+              return image?.getAttribute?.("data-original") || image?.src || "";
+            },
+            title: [
+              1,
+              (image) => image?.getAttribute?.("data-caption") || image?.alt || "",
+            ],
+          });
+
+          cleanup = (fromHidden = false) => {
+            if (isCleaning) return;
+            isCleaning = true;
+            viewer.element.removeEventListener("hidden", hiddenHandler);
+            if (activeViewerInstance === viewer) {
+              activeViewerInstance = null;
+              activeViewerEntryId = null;
+            }
+            activeViewerCleanup = null;
+            clearViewerRoot();
+            if (!fromHidden) {
+              try {
+                viewer.hide?.();
+              } catch (error) {
+                logError("viewer hide error", error);
+              }
+            }
+            try {
+              viewer.destroy();
+            } catch (error) {
+              logError("viewer destroy error", error);
+            }
+            isCleaning = false;
+          };
+
+          viewer.element.addEventListener("hidden", hiddenHandler);
+
+          activeViewerInstance = viewer;
+          activeViewerEntryId = entry.id ?? null;
+          activeViewerCleanup = cleanup;
+
+          viewer.show();
+        } catch (error) {
+          logError("openGallery error", error);
+          destroyActiveViewer();
+          showToast("Failed to open image gallery.", "warn");
+        }
       };
 
       const fetchEntries = async () => {
@@ -146,7 +497,7 @@ function createHistoryComponent(api, toastStore, vueHelpers, eventBus) {
           }
           const data = await response.json();
           entries.value = Array.isArray(data.entries) ? data.entries : [];
-          resetExpandedFiles();
+          destroyActiveViewer();
         } catch (error) {
           logError("fetchEntries error", error);
           errorMessage.value =
@@ -176,7 +527,9 @@ function createHistoryComponent(api, toastStore, vueHelpers, eventBus) {
             throw new Error(`Delete failed (${response.status})`);
           }
           entries.value = entries.value.filter((item) => item.id !== entry.id);
-          collapseFiles(entry.id);
+          if (entry?.id && entry.id === activeViewerEntryId) {
+            destroyActiveViewer();
+          }
           showToast("History entry deleted.", "success");
         } catch (error) {
           logError("deleteEntry error", error);
@@ -193,16 +546,12 @@ function createHistoryComponent(api, toastStore, vueHelpers, eventBus) {
             throw new Error(`Clear failed (${response.status})`);
           }
           entries.value = [];
-          resetExpandedFiles();
+          destroyActiveViewer();
           showToast("Cleared all history.", "success");
         } catch (error) {
           logError("clearAll error", error);
           showToast("Failed to clear history.", "error");
         }
-      };
-
-      const openImage = (url) => {
-        window.open(url, "_blank", "noopener,noreferrer");
       };
 
       const updateEventName = "PromptHistoryGallery.updated";
@@ -223,6 +572,8 @@ function createHistoryComponent(api, toastStore, vueHelpers, eventBus) {
           api.removeEventListener(updateEventName, handleHistoryUpdate);
         }
         eventBus?.off?.(updateEventName, handleHistoryUpdate);
+        destroyActiveViewer();
+        removeViewerRoot();
       });
 
       return {
@@ -234,41 +585,11 @@ function createHistoryComponent(api, toastStore, vueHelpers, eventBus) {
         copyPrompt,
         deleteEntry,
         clearAll,
-        openImage,
-        toggleFiles,
-        isFilesVisible,
+        openGallery,
       };
     },
     render() {
       const h = vueHelpers.h;
-
-      const toFileLabel = (file) => {
-        if (typeof file === "string") {
-          return file;
-        }
-        if (!file || typeof file !== "object") {
-          return "(unknown file)";
-        }
-        const filename = file.filename ?? "";
-        const location = file.subfolder
-          ? `${file.subfolder}/${filename}`
-          : filename;
-        if (file.type && file.type !== "output") {
-          return location ? `${location} (${file.type})` : `(${file.type})`;
-        }
-        return location || "(unknown file)";
-      };
-
-      const toFileKey = (file, index) => {
-        if (typeof file === "string") {
-          return `${file}-${index}`;
-        }
-        if (!file || typeof file !== "object") {
-          return `file-${index}`;
-        }
-        const parts = [file.subfolder ?? "", file.filename ?? "", file.type ?? "", index];
-        return parts.join("|");
-      };
 
       const toLastUsedTimestamp = (entry) =>
         entry?.last_used_at ?? entry?.created_at ?? "";
@@ -325,45 +646,23 @@ function createHistoryComponent(api, toastStore, vueHelpers, eventBus) {
                 )
               : null;
 
-          const files = Array.isArray(entry.files)
-            ? entry.files
-            : Array.isArray(entry?.metadata?.files)
-            ? entry.metadata.files
-            : [];
-          const hasFiles = files.length > 0;
-
-          const filesButton = h(
+          const galleryItems = buildImageSources(entry, api);
+          const hasGallery = galleryItems.length > 0;
+          const galleryLabel = hasGallery
+            ? `Gallery (${galleryItems.length})`
+            : "Gallery";
+          const galleryButton = h(
             "button",
             {
               class: "phg-button phg-button--icon",
-              title: hasFiles
-                ? this.isFilesVisible(entry.id)
-                  ? "Hide generated files"
-                  : "Show generated files"
-                : "No generated files were captured",
-              disabled: !hasFiles,
-              onClick: () => this.toggleFiles(entry.id),
+              title: hasGallery
+                ? `Open gallery (${galleryItems.length} images)`
+                : "No generated images were captured",
+              disabled: !hasGallery,
+              onClick: () => this.openGallery(entry, galleryItems, 0),
             },
-            hasFiles && this.isFilesVisible(entry.id) ? "Hide Files" : "Files"
+            galleryLabel
           );
-
-          const galleryItems = buildImageSources(entry, api);
-          const gallery =
-            galleryItems.length > 0
-              ? h(
-                  "div",
-                  { class: "phg-entry-gallery" },
-                  galleryItems.map((image) =>
-                    h("img", {
-                      src: image.url,
-                      alt: image.title,
-                      class: "phg-entry-image",
-                      title: "Open image in new tab",
-                      onClick: () => this.openImage(image.url),
-                    })
-                  )
-                )
-              : null;
 
           const metadataNotes = entry?.metadata?.notes
             ? h(
@@ -372,35 +671,6 @@ function createHistoryComponent(api, toastStore, vueHelpers, eventBus) {
                 String(entry.metadata.notes)
               )
             : null;
-
-          const filesList =
-            hasFiles && this.isFilesVisible(entry.id)
-              ? h(
-                  "div",
-                  { class: "phg-entry-files" },
-                  [
-                    h(
-                      "div",
-                      { class: "phg-entry-files-title" },
-                      "Generated files"
-                    ),
-                    h(
-                      "ul",
-                      { class: "phg-file-list" },
-                      files.map((file, index) =>
-                        h(
-                          "li",
-                          {
-                            class: "phg-file-item",
-                            key: toFileKey(file, index),
-                          },
-                          toFileLabel(file)
-                        )
-                      )
-                    ),
-                  ]
-                )
-              : null;
 
           const lastUsed = toLastUsedTimestamp(entry);
           const displayDate = lastUsed ? toDateLabel(lastUsed) : "Unknown";
@@ -431,7 +701,7 @@ function createHistoryComponent(api, toastStore, vueHelpers, eventBus) {
                     },
                     "Copy"
                   ),
-                  filesButton,
+                  galleryButton,
                   h(
                     "button",
                     {
@@ -446,8 +716,6 @@ function createHistoryComponent(api, toastStore, vueHelpers, eventBus) {
               h("pre", { class: "phg-entry-prompt" }, entry.prompt ?? ""),
               tags,
               metadataNotes,
-              filesList,
-              gallery,
             ].filter(Boolean)
           );
         })
@@ -502,6 +770,13 @@ async function registerHistoryTab() {
     defineComponent: vue.defineComponent,
     ref: vue.ref,
     computed: vue.computed,
+    nextTick:
+      typeof vue.nextTick === "function"
+        ? vue.nextTick
+        : (callback) => {
+            const promise = Promise.resolve();
+            return callback ? promise.then(callback) : promise;
+          },
     onMounted: vue.onMounted,
     onBeforeUnmount: vue.onBeforeUnmount,
     h: vue.h,
