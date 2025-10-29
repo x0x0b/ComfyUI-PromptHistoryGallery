@@ -285,7 +285,7 @@ class PromptHistoryStorage:
                 for item in normalized:
                     cursor.execute(
                         """
-                        INSERT INTO prompt_history_output
+                        INSERT OR IGNORE INTO prompt_history_output
                             (entry_id, filename, subfolder, type)
                         VALUES
                             (:entry_id, :filename, :subfolder, :type)

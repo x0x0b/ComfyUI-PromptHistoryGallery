@@ -79,8 +79,15 @@ function toDateLabel(value) {
   }
 }
 
-function createHistoryComponent(api, toastStore, vueHelpers) {
-  const { defineComponent, ref, computed, onMounted, h } = vueHelpers;
+function createHistoryComponent(api, toastStore, vueHelpers, eventBus) {
+  const {
+    defineComponent,
+    ref,
+    computed,
+    onMounted,
+    onBeforeUnmount,
+    h,
+  } = vueHelpers;
 
   return defineComponent({
     name: "PromptHistorySidebar",
@@ -198,7 +205,25 @@ function createHistoryComponent(api, toastStore, vueHelpers) {
         window.open(url, "_blank", "noopener,noreferrer");
       };
 
-      onMounted(fetchEntries);
+      const updateEventName = "PromptHistoryGallery.updated";
+      const handleHistoryUpdate = () => {
+        fetchEntries();
+      };
+
+      onMounted(() => {
+        fetchEntries();
+        if (api?.addEventListener) {
+          api.addEventListener(updateEventName, handleHistoryUpdate);
+        }
+        eventBus?.on?.(updateEventName, handleHistoryUpdate);
+      });
+
+      onBeforeUnmount(() => {
+        if (api?.removeEventListener) {
+          api.removeEventListener(updateEventName, handleHistoryUpdate);
+        }
+        eventBus?.off?.(updateEventName, handleHistoryUpdate);
+      });
 
       return {
         entries,
@@ -471,16 +496,23 @@ async function registerHistoryTab() {
 
   const comfyApp = window.comfyAPI?.app?.app ?? null;
   const api = comfyApp?.api ?? window.comfyAPI?.api?.api ?? null;
+  const eventBus = comfyApp?.eventBus ?? null;
 
   const vueHelpers = {
     defineComponent: vue.defineComponent,
     ref: vue.ref,
     computed: vue.computed,
     onMounted: vue.onMounted,
+    onBeforeUnmount: vue.onBeforeUnmount,
     h: vue.h,
   };
 
-  const component = createHistoryComponent(api, toastStore, vueHelpers);
+  const component = createHistoryComponent(
+    api,
+    toastStore,
+    vueHelpers,
+    eventBus
+  );
 
   workspaceStore.registerSidebarTab({
     id: TAB_ID,

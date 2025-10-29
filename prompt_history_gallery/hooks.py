@@ -77,6 +77,7 @@ def _handle_prompt_completion(
     prompt_id: Optional[str],
     history_result: Any,
     prompt_payload: Any,
+    server: Optional[Any],
 ) -> None:
     storage = get_prompt_history_storage()
 
@@ -96,6 +97,15 @@ def _handle_prompt_completion(
 
     storage.touch_entries(entry_ids)
 
+    if server is not None:
+        try:
+            server.send_sync(
+                "PromptHistoryGallery.updated",
+                {"entry_ids": list(entry_ids)},
+            )
+        except Exception:  # pragma: no cover
+            LOGGER.exception("Failed to notify clients about history update")
+
 
 def _wrap_task_done() -> None:
     original = execution.PromptQueue.task_done
@@ -104,6 +114,7 @@ def _wrap_task_done() -> None:
     def wrapper(self, item_id, history_result, status):  # type: ignore[override]
         prompt_id: Optional[str] = None
         prompt_payload: Any = None
+        server = getattr(self, "server", None)
         try:
             with self.mutex:  # type: ignore[attr-defined]
                 prompt = self.currently_running.get(item_id)  # type: ignore[attr-defined]
@@ -118,7 +129,12 @@ def _wrap_task_done() -> None:
             return original(self, item_id, history_result, status)
         finally:
             try:
-                _handle_prompt_completion(prompt_id, history_result, prompt_payload)
+                _handle_prompt_completion(
+                    prompt_id,
+                    history_result,
+                    prompt_payload,
+                    server,
+                )
             except Exception:  # pragma: no cover - defensive logging.
                 LOGGER.exception("Failed to store generated files for prompt %s", prompt_id)
 
