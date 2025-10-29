@@ -20,10 +20,8 @@ function ensureStylesheet() {
   document.head.appendChild(link);
 }
 
-const VIEWERJS_VERSION = "1.11.6";
-const VIEWERJS_BASE_URL = `https://cdn.jsdelivr.net/npm/viewerjs@${VIEWERJS_VERSION}/dist`;
-const VIEWERJS_CSS_URL = `${VIEWERJS_BASE_URL}/viewer.min.css`;
-const VIEWERJS_CORE_URL = `${VIEWERJS_BASE_URL}/viewer.min.js`;
+const VIEWER_CSS_URL = new URL("./vendor/viewerjs/viewer.min.css", import.meta.url).href;
+const VIEWER_JS_URL = new URL("./vendor/viewerjs/viewer.min.js", import.meta.url).href;
 
 const externalAssetPromises = new Map();
 
@@ -109,8 +107,8 @@ let viewerLoader = null;
 async function ensureViewer() {
   if (viewerLoader) return viewerLoader;
   viewerLoader = (async () => {
-    await ensureExternalStylesheet(VIEWERJS_CSS_URL);
-    await ensureExternalScript(VIEWERJS_CORE_URL);
+    await ensureExternalStylesheet(VIEWER_CSS_URL);
+    await ensureExternalScript(VIEWER_JS_URL);
     if (typeof window.Viewer !== "function") {
       throw new Error("Viewer global was not found after loading assets.");
     }
