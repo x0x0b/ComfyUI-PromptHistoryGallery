@@ -1,0 +1,2 @@
+# Ignore generated history database files.
+prompt_history.*
