@@ -89,8 +89,32 @@ function createHistoryComponent(api, toastStore, vueHelpers) {
       const isLoading = ref(false);
       const errorMessage = ref("");
       const limit = ref(50);
+      const expandedFiles = ref(new Set());
 
       const hasEntries = computed(() => entries.value.length > 0);
+
+      const resetExpandedFiles = () => {
+        expandedFiles.value = new Set();
+      };
+
+      const toggleFiles = (entryId) => {
+        const next = new Set(expandedFiles.value);
+        if (next.has(entryId)) {
+          next.delete(entryId);
+        } else {
+          next.add(entryId);
+        }
+        expandedFiles.value = next;
+      };
+
+      const collapseFiles = (entryId) => {
+        if (!expandedFiles.value.has(entryId)) return;
+        const next = new Set(expandedFiles.value);
+        next.delete(entryId);
+        expandedFiles.value = next;
+      };
+
+      const isFilesVisible = (entryId) => expandedFiles.value.has(entryId);
 
       const showToast = (detail, severity = "info") => {
         toastStore?.add({
@@ -115,6 +139,7 @@ function createHistoryComponent(api, toastStore, vueHelpers) {
           }
           const data = await response.json();
           entries.value = Array.isArray(data.entries) ? data.entries : [];
+          resetExpandedFiles();
         } catch (error) {
           logError("fetchEntries error", error);
           errorMessage.value =
@@ -144,6 +169,7 @@ function createHistoryComponent(api, toastStore, vueHelpers) {
             throw new Error(`Delete failed (${response.status})`);
           }
           entries.value = entries.value.filter((item) => item.id !== entry.id);
+          collapseFiles(entry.id);
           showToast("History entry deleted.", "success");
         } catch (error) {
           logError("deleteEntry error", error);
@@ -160,6 +186,7 @@ function createHistoryComponent(api, toastStore, vueHelpers) {
             throw new Error(`Clear failed (${response.status})`);
           }
           entries.value = [];
+          resetExpandedFiles();
           showToast("Cleared all history.", "success");
         } catch (error) {
           logError("clearAll error", error);
@@ -183,10 +210,43 @@ function createHistoryComponent(api, toastStore, vueHelpers) {
         deleteEntry,
         clearAll,
         openImage,
+        toggleFiles,
+        isFilesVisible,
       };
     },
     render() {
       const h = vueHelpers.h;
+
+      const toFileLabel = (file) => {
+        if (typeof file === "string") {
+          return file;
+        }
+        if (!file || typeof file !== "object") {
+          return "(unknown file)";
+        }
+        const filename = file.filename ?? "";
+        const location = file.subfolder
+          ? `${file.subfolder}/${filename}`
+          : filename;
+        if (file.type && file.type !== "output") {
+          return location ? `${location} (${file.type})` : `(${file.type})`;
+        }
+        return location || "(unknown file)";
+      };
+
+      const toFileKey = (file, index) => {
+        if (typeof file === "string") {
+          return `${file}-${index}`;
+        }
+        if (!file || typeof file !== "object") {
+          return `file-${index}`;
+        }
+        const parts = [file.subfolder ?? "", file.filename ?? "", file.type ?? "", index];
+        return parts.join("|");
+      };
+
+      const toLastUsedTimestamp = (entry) =>
+        entry?.last_used_at ?? entry?.created_at ?? "";
 
       const toolbar = h("div", { class: "phg-toolbar" }, [
         h(
@@ -240,6 +300,28 @@ function createHistoryComponent(api, toastStore, vueHelpers) {
                 )
               : null;
 
+          const files = Array.isArray(entry.files)
+            ? entry.files
+            : Array.isArray(entry?.metadata?.files)
+            ? entry.metadata.files
+            : [];
+          const hasFiles = files.length > 0;
+
+          const filesButton = h(
+            "button",
+            {
+              class: "phg-button phg-button--icon",
+              title: hasFiles
+                ? this.isFilesVisible(entry.id)
+                  ? "Hide generated files"
+                  : "Show generated files"
+                : "No generated files were captured",
+              disabled: !hasFiles,
+              onClick: () => this.toggleFiles(entry.id),
+            },
+            hasFiles && this.isFilesVisible(entry.id) ? "Hide Files" : "Files"
+          );
+
           const galleryItems = buildImageSources(entry, api);
           const gallery =
             galleryItems.length > 0
@@ -266,14 +348,54 @@ function createHistoryComponent(api, toastStore, vueHelpers) {
               )
             : null;
 
+          const filesList =
+            hasFiles && this.isFilesVisible(entry.id)
+              ? h(
+                  "div",
+                  { class: "phg-entry-files" },
+                  [
+                    h(
+                      "div",
+                      { class: "phg-entry-files-title" },
+                      "Generated files"
+                    ),
+                    h(
+                      "ul",
+                      { class: "phg-file-list" },
+                      files.map((file, index) =>
+                        h(
+                          "li",
+                          {
+                            class: "phg-file-item",
+                            key: toFileKey(file, index),
+                          },
+                          toFileLabel(file)
+                        )
+                      )
+                    ),
+                  ]
+                )
+              : null;
+
+          const lastUsed = toLastUsedTimestamp(entry);
+          const displayDate = lastUsed ? toDateLabel(lastUsed) : "Unknown";
+
           return h(
             "article",
             { class: "phg-entry", key: entry.id },
             [
               h("header", { class: "phg-entry-header" }, [
-                h("span", { class: "phg-entry-date" }, [
-                  toDateLabel(entry.created_at),
-                ]),
+                h(
+                  "span",
+                  {
+                    class: "phg-entry-date",
+                    title:
+                      entry.created_at && entry.created_at !== lastUsed
+                        ? `Created: ${toDateLabel(entry.created_at)}`
+                        : undefined,
+                  },
+                  `Last used: ${displayDate}`
+                ),
                 h("div", { class: "phg-entry-actions" }, [
                   h(
                     "button",
@@ -284,6 +406,7 @@ function createHistoryComponent(api, toastStore, vueHelpers) {
                     },
                     "Copy"
                   ),
+                  filesButton,
                   h(
                     "button",
                     {
@@ -298,6 +421,7 @@ function createHistoryComponent(api, toastStore, vueHelpers) {
               h("pre", { class: "phg-entry-prompt" }, entry.prompt ?? ""),
               tags,
               metadataNotes,
+              filesList,
               gallery,
             ].filter(Boolean)
           );

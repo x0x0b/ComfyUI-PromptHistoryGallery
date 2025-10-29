@@ -8,10 +8,10 @@ import os
 import sqlite3
 import threading
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 
 def _default_storage_directory() -> Path:
@@ -43,6 +43,8 @@ class PromptHistoryEntry:
     prompt: str
     tags: List[str]
     metadata: Dict[str, Any]
+    last_used_at: str
+    files: Tuple[Dict[str, Any], ...] = field(default_factory=tuple)
 
     def to_dict(self) -> Dict[str, Any]:
         """
@@ -54,7 +56,61 @@ class PromptHistoryEntry:
             "prompt": self.prompt,
             "tags": list(self.tags),
             "metadata": self.metadata.copy(),
+            "last_used_at": self.last_used_at,
+            "files": [item.copy() for item in self.files],
         }
+
+
+def _normalize_output_payload(file_info: Any) -> Optional[Dict[str, str]]:
+    if isinstance(file_info, str):
+        filename = file_info.strip()
+        if not filename:
+            return None
+        return {"filename": filename, "subfolder": "", "type": ""}
+
+    if isinstance(file_info, dict):
+        filename_raw = file_info.get("filename")
+        if not filename_raw:
+            return None
+        filename = str(filename_raw).strip()
+        if not filename:
+            return None
+        subfolder = str(file_info.get("subfolder", "") or "").strip()
+        output_type = str(
+            file_info.get("type")
+            or file_info.get("kind")
+            or ""
+        ).strip()
+        return {
+            "filename": filename,
+            "subfolder": subfolder,
+            "type": output_type,
+        }
+
+    return None
+
+
+def _format_output_record(
+    filename: str, subfolder: str, output_type: str
+) -> Dict[str, Any]:
+    record: Dict[str, Any] = {"filename": filename}
+    if subfolder:
+        record["subfolder"] = subfolder
+    if output_type:
+        record["type"] = output_type
+    return record
+
+
+def _merge_tags(existing: List[str], incoming: List[str]) -> List[str]:
+    merged: List[str] = []
+    seen = set()
+    for source in (existing, incoming):
+        for item in source:
+            key = str(item)
+            if key not in seen and key:
+                seen.add(key)
+                merged.append(key)
+    return merged
 
 
 class PromptHistoryStorage:
@@ -70,6 +126,7 @@ class PromptHistoryStorage:
         self._lock = threading.RLock()
         self._connection = sqlite3.connect(self._file_path, check_same_thread=False)
         self._connection.row_factory = sqlite3.Row
+        self._connection.execute("PRAGMA foreign_keys = ON;")
         self._configure_database()
 
     def append(
@@ -80,40 +137,101 @@ class PromptHistoryStorage:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> PromptHistoryEntry:
         """
-        Persist a new entry and return it for optional downstream use.
+        Persist a new entry or update an existing one with the same prompt text.
         """
-        entry = PromptHistoryEntry(
-            id=str(uuid.uuid4()),
-            created_at=datetime.now(timezone.utc).isoformat(),
-            prompt=prompt,
-            tags=list(tags),
-            metadata=metadata.copy() if metadata else {},
-        )
-        encoded_tags = json.dumps(entry.tags, ensure_ascii=False)
-        encoded_metadata = json.dumps(entry.metadata, ensure_ascii=False)
+        now_iso = datetime.now(timezone.utc).isoformat()
+        incoming_tags = list(tags)
+        incoming_metadata = metadata.copy() if metadata else {}
+
         with self._lock:
             cursor = self._connection.cursor()
+            existing = cursor.execute(
+                """
+                SELECT id, created_at, last_used_at, tags, metadata
+                FROM prompt_history
+                WHERE prompt = ?
+                LIMIT 1
+                """,
+                (prompt,),
+            ).fetchone()
+
+            if existing:
+                entry_id = existing["id"]
+                created_at = existing["created_at"]
+                existing_tags = json.loads(existing["tags"]) if existing["tags"] else []
+                merged_tags = _merge_tags(existing_tags, incoming_tags)
+                existing_metadata = (
+                    json.loads(existing["metadata"]) if existing["metadata"] else {}
+                )
+                if incoming_metadata:
+                    merged_metadata = existing_metadata.copy()
+                    merged_metadata.update(incoming_metadata)
+                else:
+                    merged_metadata = existing_metadata
+
+                cursor.execute(
+                    """
+                    UPDATE prompt_history
+                    SET tags = :tags,
+                        metadata = :metadata,
+                        last_used_at = :last_used_at
+                    WHERE id = :id
+                    """,
+                    {
+                        "tags": json.dumps(merged_tags, ensure_ascii=False),
+                        "metadata": json.dumps(merged_metadata, ensure_ascii=False),
+                        "last_used_at": now_iso,
+                        "id": entry_id,
+                    },
+                )
+                self._connection.commit()
+
+                files_map = self._fetch_outputs([entry_id])
+                files = tuple(files_map.get(entry_id, []))
+                return PromptHistoryEntry(
+                    id=entry_id,
+                    created_at=created_at,
+                    prompt=prompt,
+                    tags=merged_tags,
+                    metadata=merged_metadata,
+                    last_used_at=now_iso,
+                    files=files,
+                )
+
+            entry = PromptHistoryEntry(
+                id=str(uuid.uuid4()),
+                created_at=now_iso,
+                prompt=prompt,
+                tags=incoming_tags,
+                metadata=incoming_metadata,
+                last_used_at=now_iso,
+                files=tuple(),
+            )
             cursor.execute(
                 """
-                INSERT INTO prompt_history (id, created_at, prompt, tags, metadata)
-                VALUES (:id, :created_at, :prompt, :tags, :metadata)
+                INSERT INTO prompt_history (id, created_at, last_used_at, prompt, tags, metadata)
+                VALUES (:id, :created_at, :last_used_at, :prompt, :tags, :metadata)
                 """,
                 {
                     "id": entry.id,
                     "created_at": entry.created_at,
+                    "last_used_at": entry.last_used_at,
                     "prompt": entry.prompt,
-                    "tags": encoded_tags,
-                    "metadata": encoded_metadata,
+                    "tags": json.dumps(entry.tags, ensure_ascii=False),
+                    "metadata": json.dumps(entry.metadata, ensure_ascii=False),
                 },
             )
             self._connection.commit()
-        return entry
+            return entry
 
     def list(self, limit: Optional[int] = None) -> List[PromptHistoryEntry]:
         """
         Return stored entries ordered by creation date descending.
         """
-        sql = "SELECT id, created_at, prompt, tags, metadata FROM prompt_history ORDER BY created_at DESC"
+        sql = (
+            "SELECT id, created_at, last_used_at, prompt, tags, metadata "
+            "FROM prompt_history ORDER BY last_used_at DESC, created_at DESC"
+        )
         if limit is not None:
             sql += " LIMIT ?"
             params = (limit,)
@@ -121,10 +239,13 @@ class PromptHistoryStorage:
             params = ()
         with self._lock:
             rows = self._connection.execute(sql, params).fetchall()
+        entry_ids = [row["id"] for row in rows]
+        outputs_map = self._fetch_outputs(entry_ids) if entry_ids else {}
         entries: List[PromptHistoryEntry] = []
         for row in rows:
             tags = json.loads(row["tags"]) if row["tags"] else []
             metadata = json.loads(row["metadata"]) if row["metadata"] else {}
+            files = tuple(outputs_map.get(row["id"], []))
             entries.append(
                 PromptHistoryEntry(
                     id=row["id"],
@@ -132,15 +253,120 @@ class PromptHistoryStorage:
                     prompt=row["prompt"],
                     tags=tags,
                     metadata=metadata,
+                    last_used_at=row["last_used_at"],
+                    files=files,
                 )
             )
         return entries
+
+    def add_outputs_for_entries(
+        self,
+        entry_ids: Sequence[str],
+        files: Sequence[Any],
+    ) -> None:
+        """Persist generated file metadata for related prompt entries."""
+
+        normalized: List[Dict[str, str]] = []
+        for file_info in files:
+            payload = _normalize_output_payload(file_info)
+            if payload:
+                normalized.append(payload)
+
+        if not normalized:
+            return
+
+        targets = [str(entry_id) for entry_id in entry_ids if entry_id]
+        if not targets:
+            return
+
+        with self._lock:
+            cursor = self._connection.cursor()
+            for entry_id in targets:
+                for item in normalized:
+                    cursor.execute(
+                        """
+                        INSERT INTO prompt_history_output
+                            (entry_id, filename, subfolder, type)
+                        VALUES
+                            (:entry_id, :filename, :subfolder, :type)
+                        """,
+                        {
+                            "entry_id": entry_id,
+                            "filename": item["filename"],
+                            "subfolder": item["subfolder"],
+                            "type": item["type"],
+                        },
+                    )
+            self._connection.commit()
+
+    def touch_entries(self, entry_ids: Sequence[str]) -> None:
+        targets = [str(entry_id) for entry_id in entry_ids if entry_id]
+        if not targets:
+            return
+        timestamp = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            self._connection.executemany(
+                "UPDATE prompt_history SET last_used_at = ? WHERE id = ?",
+                [(timestamp, entry_id) for entry_id in targets],
+            )
+            self._connection.commit()
+
+    def find_entry_ids_for_prompts(self, prompts: Sequence[str]) -> Dict[str, str]:
+        candidates = [str(p) for p in prompts if isinstance(p, str) and p]
+        if not candidates:
+            return {}
+
+        placeholders = ",".join(["?"] * len(candidates))
+        sql = (
+            "SELECT prompt, id FROM prompt_history WHERE prompt IN ("
+            + placeholders
+            + ")"
+        )
+
+        with self._lock:
+            rows = self._connection.execute(sql, tuple(candidates)).fetchall()
+
+        return {row["prompt"]: row["id"] for row in rows}
+
+    def _fetch_outputs(
+        self, entry_ids: Sequence[str]
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        if not entry_ids:
+            return {}
+
+        placeholders = ",".join(["?"] * len(entry_ids))
+        sql = (
+            "SELECT entry_id, filename, subfolder, type FROM prompt_history_output "
+            f"WHERE entry_id IN ({placeholders}) ORDER BY id"
+        )
+
+        with self._lock:
+            rows = self._connection.execute(sql, tuple(entry_ids)).fetchall()
+
+        outputs: Dict[str, List[Dict[str, Any]]] = {}
+        for entry_id in entry_ids:
+            outputs.setdefault(entry_id, [])
+
+        for row in rows:
+            entry_id = row["entry_id"]
+            record = _format_output_record(
+                row["filename"],
+                row["subfolder"],
+                row["type"],
+            )
+            outputs.setdefault(entry_id, []).append(record)
+
+        return outputs
 
     def delete(self, entry_id: str) -> bool:
         """
         Delete a single entry by id. Returns True if a row was removed.
         """
         with self._lock:
+            self._connection.execute(
+                "DELETE FROM prompt_history_output WHERE entry_id = ?",
+                (entry_id,),
+            )
             cursor = self._connection.execute(
                 "DELETE FROM prompt_history WHERE id = ?", (entry_id,)
             )
@@ -152,6 +378,7 @@ class PromptHistoryStorage:
         Remove all stored entries.
         """
         with self._lock:
+            self._connection.execute("DELETE FROM prompt_history_output")
             self._connection.execute("DELETE FROM prompt_history")
             self._connection.commit()
 
@@ -168,17 +395,81 @@ class PromptHistoryStorage:
                 CREATE TABLE IF NOT EXISTS prompt_history (
                     id TEXT PRIMARY KEY,
                     created_at TEXT NOT NULL,
+                    last_used_at TEXT NOT NULL,
                     prompt TEXT NOT NULL,
                     tags TEXT NOT NULL,
                     metadata TEXT NOT NULL
                 )
                 """
             )
+            existing_columns = {
+                row["name"]
+                for row in cursor.execute("PRAGMA table_info(prompt_history)")
+            }
+            if "last_used_at" not in existing_columns:
+                cursor.execute(
+                    "ALTER TABLE prompt_history ADD COLUMN last_used_at TEXT"
+                )
+                cursor.execute(
+                    """
+                    UPDATE prompt_history
+                    SET last_used_at = COALESCE(last_used_at, created_at)
+                    """
+                )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS prompt_history_output (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    entry_id TEXT NOT NULL,
+                    filename TEXT NOT NULL,
+                    subfolder TEXT NOT NULL DEFAULT '',
+                    type TEXT NOT NULL DEFAULT '',
+                    UNIQUE(entry_id, filename, subfolder, type),
+                    FOREIGN KEY(entry_id) REFERENCES prompt_history(id) ON DELETE CASCADE
+                )
+                """
+            )
+            cursor.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_prompt_history_output_entry
+                ON prompt_history_output (entry_id)
+                """
+            )
+            try:
+                cursor.execute(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_prompt_history_prompt_unique
+                    ON prompt_history (prompt)
+                    """
+                )
+            except sqlite3.IntegrityError:
+                # Existing duplicate prompts prevent the unique index. Leave data as-is.
+                pass
             self._connection.commit()
 
 
 _STORAGE_INSTANCE: Optional[PromptHistoryStorage] = None
 _INSTANCE_LOCK = threading.Lock()
+
+_PROMPT_ENTRY_REGISTRY: Dict[str, List[str]] = {}
+_REGISTRY_LOCK = threading.Lock()
+
+
+def register_prompt_entry(prompt_id: Optional[str], entry_id: str) -> None:
+    """Track prompt executions so generated files can be linked later."""
+    if not prompt_id:
+        return
+    with _REGISTRY_LOCK:
+        bucket = _PROMPT_ENTRY_REGISTRY.setdefault(prompt_id, [])
+        bucket.append(entry_id)
+
+
+def consume_prompt_entries(prompt_id: Optional[str]) -> List[str]:
+    """Retrieve and clear pending entries for the given prompt id."""
+    if not prompt_id:
+        return []
+    with _REGISTRY_LOCK:
+        return _PROMPT_ENTRY_REGISTRY.pop(prompt_id, [])
 
 
 def get_prompt_history_storage() -> PromptHistoryStorage:

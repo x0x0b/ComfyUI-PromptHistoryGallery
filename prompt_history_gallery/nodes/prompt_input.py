@@ -5,7 +5,9 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
-from ..storage import get_prompt_history_storage
+from comfy_execution.utils import get_executing_context
+
+from ..storage import get_prompt_history_storage, register_prompt_entry
 
 
 def _coerce_tags(raw: Any) -> List[str]:
@@ -101,11 +103,18 @@ class PromptHistoryInput:
     ) -> Tuple[Any]:
         tags_list = _coerce_tags(tags)
         metadata_dict = _ensure_metadata(metadata)
-        self._storage.append(
+        metadata_dict = metadata_dict.copy()
+        context = get_executing_context()
+        prompt_id = context.prompt_id if context else None
+        if prompt_id and "prompt_id" not in metadata_dict:
+            metadata_dict["prompt_id"] = prompt_id
+        entry = self._storage.append(
             prompt=prompt,
             tags=tags_list,
             metadata=metadata_dict,
         )
+        if prompt_id:
+            register_prompt_entry(prompt_id, entry.id)
         tokens = clip.tokenize(prompt)
         conditioning = clip.encode_from_tokens_scheduled(tokens)
         return (conditioning,)

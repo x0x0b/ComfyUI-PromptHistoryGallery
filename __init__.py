@@ -23,6 +23,8 @@ __all__ = [
 
 def _serialize_entry(entry):
     payload = entry.to_dict()
+    if not isinstance(payload.get("files"), list):
+        payload["files"] = []
     return payload
 
 
