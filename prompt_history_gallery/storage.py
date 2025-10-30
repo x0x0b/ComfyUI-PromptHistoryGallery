@@ -106,6 +106,8 @@ class PromptHistoryStorage:
     SQLite-backed storage with coarse locking to prevent corruption.
     """
 
+    _FALLBACK_LOOKUP_LIMIT = 25
+
     def __init__(self, storage_file: Optional[Path] = None) -> None:
         if storage_file is None:
             storage_file = _default_storage_directory() / "prompt_history.db"
@@ -117,6 +119,100 @@ class PromptHistoryStorage:
         self._connection.execute("PRAGMA foreign_keys = ON;")
         self._configure_database()
 
+    def _row_to_entry(
+        self,
+        row: sqlite3.Row,
+        files: Sequence[Dict[str, Any]] = (),
+    ) -> PromptHistoryEntry:
+        tags = json.loads(row["tags"]) if row["tags"] else []
+        metadata = json.loads(row["metadata"]) if row["metadata"] else {}
+        return PromptHistoryEntry(
+            id=row["id"],
+            created_at=row["created_at"],
+            prompt=row["prompt"],
+            tags=tags,
+            metadata=metadata,
+            last_used_at=row["last_used_at"],
+            files=tuple(files),
+        )
+
+    def _create_entry_locked(
+        self,
+        prompt: str,
+        tags: List[str],
+        metadata: Dict[str, Any],
+    ) -> PromptHistoryEntry:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        entry = PromptHistoryEntry(
+            id=str(uuid.uuid4()),
+            created_at=now_iso,
+            prompt=prompt,
+            tags=list(tags),
+            metadata=metadata.copy(),
+            last_used_at=now_iso,
+            files=tuple(),
+        )
+        cursor = self._connection.cursor()
+        cursor.execute(
+            """
+            INSERT INTO prompt_history (id, created_at, last_used_at, prompt, tags, metadata)
+            VALUES (:id, :created_at, :last_used_at, :prompt, :tags, :metadata)
+            """,
+            {
+                "id": entry.id,
+                "created_at": entry.created_at,
+                "last_used_at": entry.last_used_at,
+                "prompt": entry.prompt,
+                "tags": json.dumps(entry.tags, ensure_ascii=False),
+                "metadata": json.dumps(entry.metadata, ensure_ascii=False),
+            },
+        )
+        return entry
+
+    def _find_entry_locked(
+        self,
+        prompt: str,
+        tags: List[str],
+        metadata: Dict[str, Any],
+    ) -> Optional[PromptHistoryEntry]:
+        """
+        Attempt to find an existing entry that matches the provided payload.
+        """
+        payload = {
+            "prompt": prompt,
+            "tags": json.dumps(tags, ensure_ascii=False),
+            "metadata": json.dumps(metadata, ensure_ascii=False),
+        }
+        cursor = self._connection.cursor()
+        row = cursor.execute(
+            """
+            SELECT id, created_at, last_used_at, prompt, tags, metadata
+            FROM prompt_history
+            WHERE prompt = :prompt AND tags = :tags AND metadata = :metadata
+            ORDER BY last_used_at DESC
+            LIMIT 1
+            """,
+            payload,
+        ).fetchone()
+        if row is not None:
+            return self._row_to_entry(row)
+
+        fallback_rows = cursor.execute(
+            """
+            SELECT id, created_at, last_used_at, prompt, tags, metadata
+            FROM prompt_history
+            WHERE prompt = ?
+            ORDER BY last_used_at DESC, created_at DESC
+            LIMIT ?
+            """,
+            (prompt, self._FALLBACK_LOOKUP_LIMIT),
+        ).fetchall()
+        for candidate in fallback_rows:
+            entry = self._row_to_entry(candidate)
+            if entry.tags == tags and entry.metadata == metadata:
+                return entry
+        return None
+
     def append(
         self,
         prompt: str,
@@ -125,38 +221,33 @@ class PromptHistoryStorage:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> PromptHistoryEntry:
         """Persist a new entry for the provided prompt text."""
-        now_iso = datetime.now(timezone.utc).isoformat()
         incoming_tags = list(tags)
         incoming_metadata = metadata.copy() if metadata else {}
-
-        entry = PromptHistoryEntry(
-            id=str(uuid.uuid4()),
-            created_at=now_iso,
-            prompt=prompt,
-            tags=incoming_tags,
-            metadata=incoming_metadata,
-            last_used_at=now_iso,
-            files=tuple(),
-        )
-
         with self._lock:
-            cursor = self._connection.cursor()
-            cursor.execute(
-                """
-                INSERT INTO prompt_history (id, created_at, last_used_at, prompt, tags, metadata)
-                VALUES (:id, :created_at, :last_used_at, :prompt, :tags, :metadata)
-                """,
-                {
-                    "id": entry.id,
-                    "created_at": entry.created_at,
-                    "last_used_at": entry.last_used_at,
-                    "prompt": entry.prompt,
-                    "tags": json.dumps(entry.tags, ensure_ascii=False),
-                    "metadata": json.dumps(entry.metadata, ensure_ascii=False),
-                },
-            )
+            entry = self._create_entry_locked(prompt, incoming_tags, incoming_metadata)
             self._connection.commit()
         return entry
+
+    def ensure_entry(
+        self,
+        prompt: str,
+        *,
+        tags: List[str],
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[PromptHistoryEntry, bool]:
+        """
+        Retrieve an existing entry that matches the provided payload, or create one.
+        Returns the entry and a flag indicating whether it was newly created.
+        """
+        incoming_tags = list(tags)
+        incoming_metadata = metadata.copy() if metadata else {}
+        with self._lock:
+            existing = self._find_entry_locked(prompt, incoming_tags, incoming_metadata)
+            if existing is not None:
+                return existing, False
+            entry = self._create_entry_locked(prompt, incoming_tags, incoming_metadata)
+            self._connection.commit()
+            return entry, True
 
     def list(self, limit: Optional[int] = None) -> List[PromptHistoryEntry]:
         """
@@ -177,20 +268,8 @@ class PromptHistoryStorage:
         outputs_map = self._fetch_outputs(entry_ids) if entry_ids else {}
         entries: List[PromptHistoryEntry] = []
         for row in rows:
-            tags = json.loads(row["tags"]) if row["tags"] else []
-            metadata = json.loads(row["metadata"]) if row["metadata"] else {}
             files = tuple(outputs_map.get(row["id"], []))
-            entries.append(
-                PromptHistoryEntry(
-                    id=row["id"],
-                    created_at=row["created_at"],
-                    prompt=row["prompt"],
-                    tags=tags,
-                    metadata=metadata,
-                    last_used_at=row["last_used_at"],
-                    files=files,
-                )
-            )
+            entries.append(self._row_to_entry(row, files))
         return entries
 
     def add_outputs_for_entries(

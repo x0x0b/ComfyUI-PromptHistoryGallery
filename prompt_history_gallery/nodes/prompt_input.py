@@ -3,11 +3,14 @@ Prompt input node that records text prompts into history storage.
 """
 from __future__ import annotations
 
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from comfy_execution.utils import get_executing_context
 
 from ..storage import get_prompt_history_storage, register_prompt_entry
+
+_NODE_METADATA_KEY = "_prompt_history_node"
 
 
 def _coerce_tags(raw: Any) -> List[str]:
@@ -50,6 +53,37 @@ def _ensure_metadata(raw: Any) -> Dict[str, Any]:
         if result:
             return result
     return {}
+
+
+def _resolve_node_identifier(context: Any) -> Optional[str]:
+    """
+    Attempt to derive a stable identifier for the executing node instance.
+    """
+    if context is None:
+        return None
+
+    for attribute in ("node_id", "node_index", "node_identifier", "node_ref"):
+        value = getattr(context, attribute, None)
+        if value is not None:
+            return str(value)
+
+    node = getattr(context, "node", None)
+    if node is None:
+        return None
+
+    if isinstance(node, dict):
+        for key in ("id", "name", "title"):
+            value = node.get(key)
+            if value is not None:
+                return str(value)
+        return None
+
+    for attribute in ("id", "name", "title"):
+        value = getattr(node, attribute, None)
+        if value is not None:
+            return str(value)
+
+    return None
 
 
 class PromptHistoryInput:
@@ -106,15 +140,32 @@ class PromptHistoryInput:
         metadata_dict = metadata_dict.copy()
         context = get_executing_context()
         prompt_id = context.prompt_id if context else None
-        if prompt_id and "prompt_id" not in metadata_dict:
-            metadata_dict["prompt_id"] = prompt_id
-        entry = self._storage.append(
+        node_identifier = _resolve_node_identifier(context)
+        if node_identifier and _NODE_METADATA_KEY not in metadata_dict:
+            metadata_dict[_NODE_METADATA_KEY] = node_identifier
+        entry, created = self._storage.ensure_entry(
             prompt=prompt,
             tags=tags_list,
             metadata=metadata_dict,
         )
+        if not created:
+            self._storage.touch_entries([entry.id])
         if prompt_id:
             register_prompt_entry(prompt_id, entry.id)
         tokens = clip.tokenize(prompt)
         conditioning = clip.encode_from_tokens_scheduled(tokens)
         return (conditioning,)
+
+    @classmethod
+    def IS_CHANGED(
+        cls,
+        clip,
+        prompt: str,
+        tags: str = "",
+        metadata: Optional[Dict[str, Any]] = None,
+    ):
+        """
+        Force the node to execute on every graph run so that the prompt history
+        captures repeated prompts (e.g. unchanged negative prompts).
+        """
+        return time.time()
