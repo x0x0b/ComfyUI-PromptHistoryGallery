@@ -101,18 +101,6 @@ def _format_output_record(
     return record
 
 
-def _merge_tags(existing: List[str], incoming: List[str]) -> List[str]:
-    merged: List[str] = []
-    seen = set()
-    for source in (existing, incoming):
-        for item in source:
-            key = str(item)
-            if key not in seen and key:
-                seen.add(key)
-                merged.append(key)
-    return merged
-
-
 class PromptHistoryStorage:
     """
     SQLite-backed storage with coarse locking to prevent corruption.
@@ -136,77 +124,23 @@ class PromptHistoryStorage:
         tags: List[str],
         metadata: Optional[Dict[str, Any]] = None,
     ) -> PromptHistoryEntry:
-        """
-        Persist a new entry or update an existing one with the same prompt text.
-        """
+        """Persist a new entry for the provided prompt text."""
         now_iso = datetime.now(timezone.utc).isoformat()
         incoming_tags = list(tags)
         incoming_metadata = metadata.copy() if metadata else {}
 
+        entry = PromptHistoryEntry(
+            id=str(uuid.uuid4()),
+            created_at=now_iso,
+            prompt=prompt,
+            tags=incoming_tags,
+            metadata=incoming_metadata,
+            last_used_at=now_iso,
+            files=tuple(),
+        )
+
         with self._lock:
             cursor = self._connection.cursor()
-            existing = cursor.execute(
-                """
-                SELECT id, created_at, last_used_at, tags, metadata
-                FROM prompt_history
-                WHERE prompt = ?
-                LIMIT 1
-                """,
-                (prompt,),
-            ).fetchone()
-
-            if existing:
-                entry_id = existing["id"]
-                created_at = existing["created_at"]
-                existing_tags = json.loads(existing["tags"]) if existing["tags"] else []
-                merged_tags = _merge_tags(existing_tags, incoming_tags)
-                existing_metadata = (
-                    json.loads(existing["metadata"]) if existing["metadata"] else {}
-                )
-                if incoming_metadata:
-                    merged_metadata = existing_metadata.copy()
-                    merged_metadata.update(incoming_metadata)
-                else:
-                    merged_metadata = existing_metadata
-
-                cursor.execute(
-                    """
-                    UPDATE prompt_history
-                    SET tags = :tags,
-                        metadata = :metadata,
-                        last_used_at = :last_used_at
-                    WHERE id = :id
-                    """,
-                    {
-                        "tags": json.dumps(merged_tags, ensure_ascii=False),
-                        "metadata": json.dumps(merged_metadata, ensure_ascii=False),
-                        "last_used_at": now_iso,
-                        "id": entry_id,
-                    },
-                )
-                self._connection.commit()
-
-                files_map = self._fetch_outputs([entry_id])
-                files = tuple(files_map.get(entry_id, []))
-                return PromptHistoryEntry(
-                    id=entry_id,
-                    created_at=created_at,
-                    prompt=prompt,
-                    tags=merged_tags,
-                    metadata=merged_metadata,
-                    last_used_at=now_iso,
-                    files=files,
-                )
-
-            entry = PromptHistoryEntry(
-                id=str(uuid.uuid4()),
-                created_at=now_iso,
-                prompt=prompt,
-                tags=incoming_tags,
-                metadata=incoming_metadata,
-                last_used_at=now_iso,
-                files=tuple(),
-            )
             cursor.execute(
                 """
                 INSERT INTO prompt_history (id, created_at, last_used_at, prompt, tags, metadata)
@@ -222,7 +156,7 @@ class PromptHistoryStorage:
                 },
             )
             self._connection.commit()
-            return entry
+        return entry
 
     def list(self, limit: Optional[int] = None) -> List[PromptHistoryEntry]:
         """
@@ -320,13 +254,19 @@ class PromptHistoryStorage:
         sql = (
             "SELECT prompt, id FROM prompt_history WHERE prompt IN ("
             + placeholders
-            + ")"
+            + ") ORDER BY created_at DESC"
         )
 
         with self._lock:
             rows = self._connection.execute(sql, tuple(candidates)).fetchall()
 
-        return {row["prompt"]: row["id"] for row in rows}
+        mapping: Dict[str, str] = {}
+        for row in rows:
+            prompt = row["prompt"]
+            if prompt not in mapping:
+                mapping[prompt] = row["id"]
+
+        return mapping
 
     def _fetch_outputs(
         self, entry_ids: Sequence[str]
@@ -435,16 +375,9 @@ class PromptHistoryStorage:
                 ON prompt_history_output (entry_id)
                 """
             )
-            try:
-                cursor.execute(
-                    """
-                    CREATE UNIQUE INDEX IF NOT EXISTS idx_prompt_history_prompt_unique
-                    ON prompt_history (prompt)
-                    """
-                )
-            except sqlite3.IntegrityError:
-                # Existing duplicate prompts prevent the unique index. Leave data as-is.
-                pass
+            cursor.execute(
+                "DROP INDEX IF EXISTS idx_prompt_history_prompt_unique"
+            )
             self._connection.commit()
 
 
