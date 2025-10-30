@@ -206,6 +206,50 @@ function createHistoryComponent({
     },
     render() {
       const createText = (text) => h("span", text);
+      const createIconButton = ({
+        icon,
+        label,
+        onClick,
+        disabled = false,
+        severity = null,
+        badge = null,
+      }) => {
+        const classes = [
+          "p-button",
+          "p-button-rounded",
+          "p-button-text",
+          "p-button-icon-only",
+          "p-button-sm",
+          "phg-action-button",
+        ];
+        if (severity === "danger") {
+          classes.push("p-button-danger");
+        }
+
+        return h(
+          "button",
+          {
+            class: classes.join(" "),
+            type: "button",
+            disabled,
+            onClick,
+            title: label,
+            "aria-label": label,
+          },
+          [
+            h("i", { class: `pi ${icon}` }),
+            badge != null
+              ? h(
+                  "span",
+                  {
+                    class: "p-badge phg-action-badge",
+                  },
+                  String(badge)
+                )
+              : null,
+          ].filter(Boolean)
+        );
+      };
 
       const status = this.errorMessage
         ? h("div", { class: "phg-message phg-message--error" }, [
@@ -227,9 +271,6 @@ function createHistoryComponent({
         this.entries.map((entry) => {
           const galleryItems = this.buildImageSources(entry);
           const hasGallery = galleryItems.length > 0;
-          const galleryLabel = hasGallery
-            ? `Gallery (${galleryItems.length})`
-            : "Gallery";
 
           const tags =
             Array.isArray(entry.tags) && entry.tags.length > 0
@@ -270,39 +311,29 @@ function createHistoryComponent({
                         ? `Created: ${new Date(entry.created_at).toLocaleString()}`
                         : undefined,
                   },
-                  `Last used: ${displayDate}`
+                  displayDate
                 ),
                 h("div", { class: "phg-entry-actions" }, [
-                  h(
-                    "button",
-                    {
-                      class: "phg-button phg-button--icon",
-                      title: "Copy prompt",
-                      onClick: () => this.copyPrompt(entry),
-                    },
-                    "Copy"
-                  ),
-                  h(
-                    "button",
-                    {
-                      class: "phg-button phg-button--icon",
-                      title: hasGallery
-                        ? `Open gallery (${galleryItems.length} images)`
-                        : "No generated images were captured",
-                      disabled: !hasGallery,
-                      onClick: () => this.openGallery(entry, 0),
-                    },
-                    galleryLabel
-                  ),
-                  h(
-                    "button",
-                    {
-                      class: "phg-button phg-button--icon phg-button--danger",
-                      title: "Delete entry",
-                      onClick: () => this.deleteEntry(entry),
-                    },
-                    "Delete"
-                  ),
+                  createIconButton({
+                    icon: "pi-copy",
+                    label: "Copy prompt",
+                    onClick: () => this.copyPrompt(entry),
+                  }),
+                  createIconButton({
+                    icon: "pi-image",
+                    label: hasGallery
+                      ? `Open gallery (${galleryItems.length} images)`
+                      : "No generated images were captured",
+                    disabled: !hasGallery,
+                    onClick: () => this.openGallery(entry, 0),
+                    badge: hasGallery ? galleryItems.length : null,
+                  }),
+                  createIconButton({
+                    icon: "pi-trash",
+                    label: "Delete entry",
+                    severity: "danger",
+                    onClick: () => this.deleteEntry(entry),
+                  }),
                 ]),
               ]),
               h("pre", { class: "phg-entry-prompt" }, entry.prompt ?? ""),

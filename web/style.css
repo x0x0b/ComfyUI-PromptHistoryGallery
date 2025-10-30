@@ -7,39 +7,6 @@
   color: var(--p-text-color);
 }
 
-.phg-toolbar {
-  display: flex;
-  gap: 0.5rem;
-}
-
-.phg-button {
-  padding: 0.3rem 0.75rem;
-  border-radius: 0.375rem;
-  border: 1px solid var(--p-button-outlined-border-color, rgba(255, 255, 255, 0.2));
-  background: var(--p-button-outlined-background, transparent);
-  color: var(--p-text-color);
-  cursor: pointer;
-  transition: background 0.2s ease;
-}
-
-.phg-button:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.phg-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.phg-button--danger {
-  color: var(--p-red-400, #f87171);
-  border-color: var(--p-red-600, #dc2626);
-}
-
-.phg-button--icon {
-  padding: 0.25rem 0.5rem;
-}
-
 .phg-message {
   padding: 0.5rem;
   border-radius: 0.5rem;
@@ -86,6 +53,30 @@
 .phg-entry-actions {
   display: flex;
   gap: 0.25rem;
+}
+
+.phg-action-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.phg-action-button .pi {
+  font-size: 0.95rem;
+}
+
+.phg-action-button:disabled .pi {
+  opacity: 0.6;
+}
+
+.phg-action-badge {
+  position: absolute;
+  top: -0.25rem;
+  right: -0.25rem;
+  transform: translate(40%, -40%);
+  font-size: 0.65rem;
+  pointer-events: none;
 }
 
 .phg-entry-prompt {
