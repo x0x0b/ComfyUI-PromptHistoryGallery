@@ -90,7 +90,7 @@ class PromptHistoryInput:
         }
 
     RETURN_TYPES = ("CONDITIONING",)
-    RETURN_NAMES = ("conditioning",)
+    RETURN_NAMES = ("CONDITIONING",)
     FUNCTION = "record_prompt"
     CATEGORY = "Prompt History"
 
