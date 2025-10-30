@@ -207,28 +207,6 @@ function createHistoryComponent({
     render() {
       const createText = (text) => h("span", text);
 
-      const toolbar = h("div", { class: "phg-toolbar" }, [
-        h(
-          "button",
-          {
-            class: "phg-button",
-            disabled: this.isLoading,
-            onClick: this.refreshEntries,
-          },
-          this.isLoading ? "Refreshing…" : "Refresh"
-        ),
-        h(
-          "button",
-          {
-            class: "phg-button phg-button--danger",
-            disabled: this.isLoading || !this.hasEntries,
-            onClick: this.clearAll,
-            title: "Clear all history",
-          },
-          "Clear"
-        ),
-      ]);
-
       const status = this.errorMessage
         ? h("div", { class: "phg-message phg-message--error" }, [
             createText(this.errorMessage),
@@ -336,7 +314,6 @@ function createHistoryComponent({
       );
 
       return h("div", { class: "phg-container" }, [
-        toolbar,
         status,
         this.isLoading
           ? h("div", { class: "phg-message" }, "Loading history…")

@@ -17,5 +17,5 @@ Each execution appends an entry to a SQLite database (default: `prompt_history_g
 
 - A `History` tab appears in the left ComfyUI sidebar, listing stored prompt entries.
 - Each entry supports copying the prompt, deleting the entry, and previewing image thumbnails provided via metadata.
-- Use the `Refresh` button to pull the latest entries and `Clear` to remove all history.
+- Entries update automatically when history changes via the ComfyUI event bus.
 - To show thumbnails, include data such as `{"images": [{"filename": "...", "subfolder": "...", "type": "output"}]}` in the node's `Metadata` input.
