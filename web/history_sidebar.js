@@ -63,6 +63,7 @@ function createHistoryComponent({
   vueHelpers,
   eventBus,
   assetLoader,
+  comfyApp,
 }) {
   const {
     defineComponent,
@@ -91,6 +92,235 @@ function createHistoryComponent({
       const limit = ref(50);
 
       const hasEntries = computed(() => entries.value.length > 0);
+      const activePromptTarget = ref(null);
+      const hasActivePromptTarget = computed(
+        () => activePromptTarget.value != null
+      );
+
+      const resolvePromptWidget = (node) => {
+        if (!node?.widgets || !Array.isArray(node.widgets)) return null;
+        return node.widgets.find((widget) => widget?.name === "prompt") ?? null;
+      };
+
+      const resolveSelectedPromptNode = () => {
+        const canvas = comfyApp?.canvas ?? null;
+        if (!canvas?.selected_nodes) return null;
+        const selectedNodes = canvas.selected_nodes;
+        const candidates = Array.isArray(selectedNodes)
+          ? selectedNodes
+          : Object.values(selectedNodes);
+        for (const candidate of candidates) {
+          if (candidate?.comfyClass !== "PromptHistoryInput") continue;
+          const widget = resolvePromptWidget(candidate);
+          if (widget) {
+            return { node: candidate, widget };
+          }
+        }
+        return null;
+      };
+
+      const normalizeTargetPayload = (node, widget) => {
+        if (!node || !widget) return null;
+        const nodeId = node.id ?? null;
+        if (nodeId == null) return null;
+        const nodeTitle =
+          typeof node.getTitle === "function"
+            ? node.getTitle()
+            : node.title ?? node.comfyClass ?? "Prompt History Input";
+        return {
+          nodeId,
+          graph: node.graph ?? null,
+          nodeRef: node,
+          widgetName: widget.name ?? "prompt",
+          nodeTitle,
+        };
+      };
+
+      const updateActivePromptTarget = () => {
+        const resolved = resolveSelectedPromptNode();
+        if (!resolved) {
+          if (activePromptTarget.value !== null) {
+            activePromptTarget.value = null;
+          }
+          return;
+        }
+        const next = normalizeTargetPayload(resolved.node, resolved.widget);
+        if (!next) {
+          if (activePromptTarget.value !== null) {
+            activePromptTarget.value = null;
+          }
+          return;
+        }
+        const current = activePromptTarget.value;
+        if (
+          current &&
+          current.nodeId === next.nodeId &&
+          current.graph === next.graph &&
+          current.widgetName === next.widgetName
+        ) {
+          current.nodeRef = resolved.node;
+          return;
+        }
+        activePromptTarget.value = next;
+      };
+
+      let selectionMonitorId = null;
+
+      const startSelectionMonitor = () => {
+        if (!comfyApp?.canvas) return;
+        if (selectionMonitorId != null) return;
+        updateActivePromptTarget();
+        selectionMonitorId = window.setInterval(updateActivePromptTarget, 400);
+      };
+
+      const stopSelectionMonitor = () => {
+        if (selectionMonitorId != null) {
+          window.clearInterval(selectionMonitorId);
+          selectionMonitorId = null;
+        }
+      };
+
+      const resolveNodeFromTarget = (target) => {
+        if (!target) return null;
+        const { nodeRef, nodeId, graph } = target;
+        const resolveFromGraph = (graphInstance) => {
+          if (!graphInstance?.getNodeById) return null;
+          try {
+            return graphInstance.getNodeById(nodeId) ?? null;
+          } catch (error) {
+            logError("resolveNodeFromTarget getNodeById error", error);
+            return null;
+          }
+        };
+
+        let node = resolveFromGraph(graph);
+        if (!node && nodeRef?.graph) {
+          node = resolveFromGraph(nodeRef.graph);
+        }
+        if (!node && comfyApp?.graph) {
+          node = resolveFromGraph(comfyApp.graph);
+        }
+        if (
+          !node &&
+          Array.isArray(comfyApp?.graph?.nodes)
+        ) {
+          node =
+            comfyApp.graph.nodes.find((candidate) => candidate?.id === nodeId) ??
+            null;
+        }
+        if (!node && nodeRef) {
+          node = nodeRef;
+        }
+        return node ?? null;
+      };
+
+      const applyPromptToWidget = (node, widget, promptText) => {
+        if (!node || !widget) return false;
+        const normalized =
+          typeof promptText === "string" ? promptText : String(promptText ?? "");
+        const previous =
+          typeof widget.value === "string"
+            ? widget.value
+            : widget.value ?? "";
+        if (previous === normalized) {
+          return false;
+        }
+
+        let handled = false;
+        if (typeof widget.setValue === "function") {
+          try {
+            widget.setValue(normalized, {
+              node,
+              canvas: comfyApp?.canvas ?? null,
+            });
+            handled = true;
+          } catch (error) {
+            logError("applyPromptToWidget.setValue error", error);
+          }
+        }
+
+        if (!handled) {
+          try {
+            widget.value = normalized;
+            handled = true;
+          } catch (error) {
+            logError("applyPromptToWidget.value assignment error", error);
+            return false;
+          }
+          if (typeof widget.callback === "function") {
+            try {
+              widget.callback(
+                widget.value,
+                comfyApp?.canvas ?? null,
+                node,
+                comfyApp?.canvas?.graph_mouse ?? null,
+                null
+              );
+            } catch (error) {
+              logError("applyPromptToWidget.callback error", error);
+            }
+          }
+          if (typeof node.onWidgetChanged === "function") {
+            try {
+              node.onWidgetChanged(
+                widget.name ?? "",
+                widget.value,
+                previous,
+                widget
+              );
+            } catch (error) {
+              logError("applyPromptToWidget.onWidgetChanged error", error);
+            }
+          }
+        }
+
+        if (Array.isArray(node.widgets_values)) {
+          const index = node.widgets?.indexOf?.(widget) ?? -1;
+          if (index !== -1) {
+            node.widgets_values[index] = widget.value;
+          }
+        }
+
+        node.setDirtyCanvas?.(true, true);
+        node.graph?.setDirtyCanvas?.(true, true);
+        if (node.graph) {
+          node.graph._version = (node.graph._version ?? 0) + 1;
+        }
+        return true;
+      };
+
+      const usePrompt = (entry) => {
+        if (!entry) return;
+        const target = activePromptTarget.value;
+        if (!target) {
+          copyPrompt(entry);
+          return;
+        }
+        const node = resolveNodeFromTarget(target);
+        if (!node) {
+          showToast(
+            "Active Prompt History Input is no longer available.",
+            "warn"
+          );
+          activePromptTarget.value = null;
+          return;
+        }
+        const widget =
+          node.widgets?.find((item) => item?.name === target.widgetName) ??
+          resolvePromptWidget(node);
+        if (!widget) {
+          showToast("Prompt widget not found on active node.", "warn");
+          return;
+        }
+        const updated = applyPromptToWidget(node, widget, entry.prompt ?? "");
+        target.nodeRef = node;
+        if (updated) {
+          const destination = target.nodeTitle ?? "Prompt History Input";
+          showToast(`Prompt sent to ${destination}.`, "success");
+        } else {
+          showToast("Prompt already matches selected input.", "info");
+        }
+      };
 
       const showToast = (detail, severity = "info") => {
         toastStore?.add({
@@ -177,6 +407,7 @@ function createHistoryComponent({
 
       onMounted(() => {
         refreshEntries();
+        startSelectionMonitor();
         if (api?.addEventListener) {
           api.addEventListener(updateEventName, handleHistoryUpdate);
         }
@@ -184,6 +415,7 @@ function createHistoryComponent({
       });
 
       onBeforeUnmount(() => {
+        stopSelectionMonitor();
         if (api?.removeEventListener) {
           api.removeEventListener(updateEventName, handleHistoryUpdate);
         }
@@ -196,8 +428,11 @@ function createHistoryComponent({
         isLoading,
         errorMessage,
         hasEntries,
+        hasActivePromptTarget,
+        activePromptTarget,
         refreshEntries,
         copyPrompt,
+        usePrompt,
         deleteEntry,
         clearAll,
         openGallery,
@@ -206,6 +441,7 @@ function createHistoryComponent({
     },
     render() {
       const createText = (text) => h("span", text);
+      const hasPromptTarget = this.hasActivePromptTarget;
       const createIconButton = ({
         icon,
         label,
@@ -315,9 +551,14 @@ function createHistoryComponent({
                 ),
                 h("div", { class: "phg-entry-actions" }, [
                   createIconButton({
-                    icon: "pi-copy",
-                    label: "Copy prompt",
-                    onClick: () => this.copyPrompt(entry),
+                    icon: hasPromptTarget
+                      ? "pi-arrow-circle-right"
+                      : "pi-copy",
+                    label: hasPromptTarget ? "Use prompt" : "Copy prompt",
+                    onClick: () =>
+                      hasPromptTarget
+                        ? this.usePrompt(entry)
+                        : this.copyPrompt(entry),
                   }),
                   createIconButton({
                     icon: "pi-image",
@@ -412,6 +653,7 @@ async function registerHistoryTab() {
     vueHelpers,
     eventBus,
     assetLoader,
+    comfyApp,
   });
 
   workspaceStore.registerSidebarTab({
