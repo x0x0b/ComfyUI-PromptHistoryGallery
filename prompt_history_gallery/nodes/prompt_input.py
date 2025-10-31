@@ -109,17 +109,6 @@ class PromptHistoryInput:
                 ),
             },
             "optional": {
-                "tags": (
-                    "STRING",
-                    {
-                        "default": "",
-                        "placeholder": "tag1, tag2",
-                    },
-                ),
-                "metadata": (
-                    "DICT",
-                    {},
-                ),
             },
         }
 
