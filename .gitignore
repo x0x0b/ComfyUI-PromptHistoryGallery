@@ -34,3 +34,6 @@ Thumbs.db
 # IDE metadata
 .idea/
 .vscode/
+
+# publish outputs
+node.zip
