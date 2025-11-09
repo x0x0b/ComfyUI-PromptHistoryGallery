@@ -120,7 +120,7 @@ export class ViewerBridge {
       zoomable: true,
       rotatable: true,
       scalable: true,
-      transition: true,
+      transition: false,
       fullscreen: true,
       keyboard: true,
       initialViewIndex: Math.min(Math.max(startIndex || 0, 0), items.length - 1),
