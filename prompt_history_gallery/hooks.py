@@ -1,13 +1,9 @@
-"""Runtime hooks to connect prompt executions with stored history entries."""
+"""Shared helpers for syncing ComfyUI prompt completions with stored history."""
 
 from __future__ import annotations
 
 import logging
-import threading
-from functools import wraps
 from typing import Any, Dict, List, Optional
-
-import execution
 
 from .storage import (
     consume_prompt_entries,
@@ -15,9 +11,6 @@ from .storage import (
 )
 
 LOGGER = logging.getLogger(__name__)
-
-_INSTALL_LOCK = threading.Lock()
-_IS_INSTALLED = False
 
 
 def _extract_generated_files(history_result: Any) -> List[Dict[str, Any]]:
@@ -73,7 +66,7 @@ def _extract_prompt_texts(prompt_payload: Any) -> List[str]:
     return prompts
 
 
-def _handle_prompt_completion(
+def handle_prompt_completion(
     prompt_id: Optional[str],
     history_result: Any,
     prompt_payload: Any,
@@ -105,48 +98,3 @@ def _handle_prompt_completion(
             )
         except Exception:  # pragma: no cover
             LOGGER.exception("Failed to notify clients about history update")
-
-
-def _wrap_task_done() -> None:
-    original = execution.PromptQueue.task_done
-
-    @wraps(original)
-    def wrapper(self, item_id, history_result, status, *args, **kwargs):  # type: ignore[override]
-        prompt_id: Optional[str] = None
-        prompt_payload: Any = None
-        server = getattr(self, "server", None)
-        try:
-            with self.mutex:  # type: ignore[attr-defined]
-                prompt = self.currently_running.get(item_id)  # type: ignore[attr-defined]
-                if prompt:
-                    prompt_id = prompt[1]
-                    if len(prompt) > 2:
-                        prompt_payload = prompt[2]
-        except Exception:
-            LOGGER.debug("Failed to determine prompt id for history capture.", exc_info=True)
-
-        try:
-            return original(self, item_id, history_result, status, *args, **kwargs)
-        finally:
-            try:
-                _handle_prompt_completion(
-                    prompt_id,
-                    history_result,
-                    prompt_payload,
-                    server,
-                )
-            except Exception:  # pragma: no cover - defensive logging.
-                LOGGER.exception("Failed to store generated files for prompt %s", prompt_id)
-
-    execution.PromptQueue.task_done = wrapper  # type: ignore[assignment]
-
-
-def install_hooks() -> None:
-    """Install runtime hooks once."""
-
-    global _IS_INSTALLED
-    with _INSTALL_LOCK:
-        if _IS_INSTALLED:
-            return
-        _wrap_task_done()
-        _IS_INSTALLED = True
