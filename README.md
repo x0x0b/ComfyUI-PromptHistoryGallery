@@ -4,8 +4,6 @@
 
 - `CLIP`: Connect the CLIP text encoder that should be used to embed the prompt.
 - `Prompt`: Provide any text prompt. The node saves it to history and returns a matching `CONDITIONING`.
-- `Tags` (optional): Comma- or newline-separated tags. They are trimmed and stored as a list.
-- `Metadata` (optional): Pass a `DICT` input; it is stored alongside the prompt for later use.
 
 Output:
 
@@ -16,6 +14,4 @@ Each execution appends an entry to a SQLite database (default: `prompt_history_g
 ## UI Extension (History tab)
 
 - A `History` tab appears in the left ComfyUI sidebar, listing stored prompt entries.
-- Each entry supports copying the prompt, deleting the entry, and previewing image thumbnails provided via metadata.
-- Entries update automatically when history changes via the ComfyUI event bus.
-- To show thumbnails, include data such as `{"images": [{"filename": "...", "subfolder": "...", "type": "output"}]}` in the node's `Metadata` input.
+- Each entry supports copying the prompt, deleting the entry, and previewing image thumbnails captured from previous executions.

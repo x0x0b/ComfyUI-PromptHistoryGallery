@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#312e81"/>
+      <stop offset="100%" stop-color="#14b8a6"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="48" fill="url(#grad)" />
+
+  <!-- stacked photo cards -->
+  <rect x="54" y="62" width="140" height="100" rx="18" fill="rgba(255,255,255,0.25)"/>
+  <rect x="46" y="94" width="140" height="100" rx="18" fill="#0f172a" opacity="0.85" stroke="#e2e8f0" stroke-width="4"/>
+  <rect x="58" y="106" width="116" height="76" rx="12" fill="#1e293b"/>
+  <path d="M66 168l26-32 22 18 20-26 34 40H66z" fill="#34d399"/>
+  <circle cx="110" cy="132" r="10" fill="#fef3c7"/>
+
+  <!-- clock representing history -->
+  <circle cx="190" cy="174" r="42" fill="#0f172a" opacity="0.85" stroke="#e0f2fe" stroke-width="6"/>
+  <circle cx="190" cy="174" r="6" fill="#e0f2fe"/>
+  <rect x="188" y="146" width="4" height="30" rx="2" fill="#e0f2fe"/>
+  <rect x="190" y="174" width="24" height="4" rx="2" transform="rotate(40 190 174)" fill="#e0f2fe"/>
+</svg>
