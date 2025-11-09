@@ -1,6 +1,6 @@
 [project]
 name = "comfyui-prompthistorygallery"
-version = "0.2.0"
+version = "0.2.1"
 description = "Prompt history input node plus sidebar gallery for ComfyUI."
 readme = "README.md"
 license = { file = "LICENSE" }
