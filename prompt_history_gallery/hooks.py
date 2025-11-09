@@ -111,7 +111,7 @@ def _wrap_task_done() -> None:
     original = execution.PromptQueue.task_done
 
     @wraps(original)
-    def wrapper(self, item_id, history_result, status):  # type: ignore[override]
+    def wrapper(self, item_id, history_result, status, *args, **kwargs):  # type: ignore[override]
         prompt_id: Optional[str] = None
         prompt_payload: Any = None
         server = getattr(self, "server", None)
@@ -126,7 +126,7 @@ def _wrap_task_done() -> None:
             LOGGER.debug("Failed to determine prompt id for history capture.", exc_info=True)
 
         try:
-            return original(self, item_id, history_result, status)
+            return original(self, item_id, history_result, status, *args, **kwargs)
         finally:
             try:
                 _handle_prompt_completion(
