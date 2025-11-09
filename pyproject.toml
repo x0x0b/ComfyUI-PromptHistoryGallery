@@ -1,6 +1,26 @@
 [project]
 name = "comfyui-prompthistorygallery"
 version = "0.1.0"
-description = "Add your description here"
-requires-python = ">=3.12"
+description = "Prompt history input node plus sidebar gallery for ComfyUI."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
 dependencies = []
+authors = [
+    { name = "x0x0b" },
+]
+keywords = [
+    "comfyui",
+    "prompt",
+    "prompt-history",
+    "gallery",
+]
+
+[project.urls]
+Repository = "https://github.com/x0x0b/ComfyUI-PromptHistoryGallery"
+Issues = "https://github.com/x0x0b/ComfyUI-PromptHistoryGallery/issues"
+
+[tool.comfy]
+PublisherId = "x0x0b"
+DisplayName = "Prompt History Gallery"
+Icon = "https://raw.githubusercontent.com/x0x0b/ComfyUI-PromptHistoryGallery/main/web/icon.svg"
