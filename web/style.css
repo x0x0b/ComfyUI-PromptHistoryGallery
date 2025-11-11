@@ -107,3 +107,19 @@
   font-size: 0.75rem;
   opacity: 0.8;
 }
+
+/* Enlarge Viewer.js thumbnail strip for better visibility */
+.viewer-container .viewer-navbar .viewer-list {
+  height: 8vh;
+}
+
+.viewer-container .viewer-navbar .viewer-list > li {
+  width: auto;
+  height: 100%;
+}
+
+.viewer-container .viewer-navbar .viewer-list > li img {
+  width: auto;
+  height: 100%;
+  object-fit: contain;
+}
