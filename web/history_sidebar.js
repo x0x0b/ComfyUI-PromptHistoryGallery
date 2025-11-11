@@ -331,6 +331,13 @@ function createHistoryComponent({
         });
       };
 
+      const confirmAction = (message) => {
+        if (typeof window !== "undefined" && typeof window.confirm === "function") {
+          return window.confirm(message);
+        }
+        return true;
+      };
+
       const refreshEntries = async () => {
         isLoading.value = true;
         errorMessage.value = "";
@@ -359,6 +366,10 @@ function createHistoryComponent({
 
       const deleteEntry = async (entry) => {
         if (!entry?.id) return;
+        const confirmed = confirmAction("Delete this prompt history entry?");
+        if (!confirmed) {
+          return;
+        }
         try {
           await historyApi.remove(entry.id);
           entries.value = entries.value.filter((item) => item.id !== entry.id);
@@ -373,6 +384,12 @@ function createHistoryComponent({
       };
 
       const clearAll = async () => {
+        const confirmed = confirmAction(
+          "Delete all prompt history entries? This cannot be undone."
+        );
+        if (!confirmed) {
+          return;
+        }
         try {
           await historyApi.clear();
           entries.value = [];
