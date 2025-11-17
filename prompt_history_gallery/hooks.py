@@ -92,9 +92,9 @@ def handle_prompt_completion(
 
     if server is not None:
         try:
-            server.send_sync(
-                "PromptHistoryGallery.updated",
-                {"entry_ids": list(entry_ids)},
-            )
+            payload: Dict[str, Any] = {"entry_ids": list(entry_ids)}
+            if files:
+                payload["files"] = [dict(item) for item in files]
+            server.send_sync("PromptHistoryGallery.updated", payload)
         except Exception:  # pragma: no cover
             LOGGER.exception("Failed to notify clients about history update")

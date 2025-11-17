@@ -2,17 +2,27 @@ import { createAssetLoader } from "./lib/assetLoader.js";
 import { createHistoryApi } from "./lib/historyApi.js";
 import { buildImageSources } from "./lib/imageSources.js";
 import { createViewerBridge } from "./lib/viewerBridge.js";
+import {
+  createPreviewNotifier,
+  extractEntryIds,
+} from "./lib/previewNotifier.js";
+import {
+  getPreviewSettingsStore,
+  PREVIEW_POSITIONS,
+} from "./lib/previewSettings.js";
 
 export {};
 
 const LOG_PREFIX = "[PromptHistoryGallery]";
 const EXTENSION_NAME = "PromptHistoryGallery.Sidebar";
 const TAB_ID = "prompt-history-gallery";
+const HISTORY_UPDATE_EVENT = "PromptHistoryGallery.updated";
 
 const logInfo = (...messages) => console.info(LOG_PREFIX, ...messages);
 const logError = (...messages) => console.error(LOG_PREFIX, ...messages);
 
 let isRegistered = false;
+let previewListenersAttached = false;
 
 function ensureStylesheet() {
   const attr = "data-phg-style";
@@ -64,6 +74,7 @@ function createHistoryComponent({
   eventBus,
   assetLoader,
   comfyApp,
+  historyApi: injectedHistoryApi = null,
 }) {
   const {
     defineComponent,
@@ -81,7 +92,7 @@ function createHistoryComponent({
     assetLoader,
   });
 
-  const historyApi = createHistoryApi(api);
+  const historyApi = injectedHistoryApi ?? createHistoryApi(api);
 
   return defineComponent({
     name: "PromptHistorySidebar",
@@ -90,6 +101,12 @@ function createHistoryComponent({
       const isLoading = ref(false);
       const errorMessage = ref("");
       const limit = ref(50);
+      const previewSettingsStore = getPreviewSettingsStore();
+      const previewSettings = ref(
+        previewSettingsStore?.getState?.() ?? {}
+      );
+      let settingsUnsubscribe = null;
+      const settingsCollapsed = ref(true);
 
       const hasEntries = computed(() => entries.value.length > 0);
       const activePromptTarget = ref(null);
@@ -417,9 +434,22 @@ function createHistoryComponent({
         }
       };
 
-      const updateEventName = "PromptHistoryGallery.updated";
+      const updateEventName = HISTORY_UPDATE_EVENT;
       const handleHistoryUpdate = () => {
         refreshEntries();
+      };
+
+      const updatePreviewSetting = (key, value) => {
+        if (!key) return;
+        previewSettingsStore?.update?.({ [key]: value });
+      };
+
+      const togglePreviewSettingsEnabled = (value) => {
+        previewSettingsStore?.update?.({ enabled: Boolean(value) });
+      };
+
+      const toggleSettingsCollapsed = () => {
+        settingsCollapsed.value = !settingsCollapsed.value;
       };
 
       onMounted(() => {
@@ -429,6 +459,12 @@ function createHistoryComponent({
           api.addEventListener(updateEventName, handleHistoryUpdate);
         }
         eventBus?.on?.(updateEventName, handleHistoryUpdate);
+        if (previewSettingsStore?.subscribe && !settingsUnsubscribe) {
+          settingsUnsubscribe = previewSettingsStore.subscribe((state) => {
+            previewSettings.value = { ...(state || {}) };
+          });
+          previewSettings.value = previewSettingsStore.getState();
+        }
       });
 
       onBeforeUnmount(() => {
@@ -438,6 +474,10 @@ function createHistoryComponent({
         }
         eventBus?.off?.(updateEventName, handleHistoryUpdate);
         viewerBridge.dispose();
+        if (settingsUnsubscribe) {
+          settingsUnsubscribe();
+          settingsUnsubscribe = null;
+        }
       });
 
       return {
@@ -454,11 +494,155 @@ function createHistoryComponent({
         clearAll,
         openGallery,
         buildImageSources: (entry) => buildImageSources(entry, api),
+        previewSettings,
+        previewPositionOptions: PREVIEW_POSITIONS,
+        updatePreviewSetting,
+        togglePreviewSettingsEnabled,
+        settingsCollapsed,
+        toggleSettingsCollapsed,
       };
     },
     render() {
       const createText = (text) => h("span", text);
       const hasPromptTarget = this.hasActivePromptTarget;
+      const settings = this.previewSettings || {};
+      const settingsEnabled = settings.enabled !== false;
+      const collapsed = !!this.settingsCollapsed;
+      const rangeField = ({
+        label,
+        key,
+        min,
+        max,
+        step = 1,
+        formatter = (value) => String(value),
+      }) =>
+        h(
+          "label",
+          {
+            class: [
+              "phg-settings-field",
+              !settingsEnabled ? "phg-settings-field--disabled" : null,
+            ].filter(Boolean),
+          },
+          [
+            h("span", { class: "phg-settings-label" }, label),
+            h("input", {
+              type: "range",
+              min,
+              max,
+              step,
+              value: settings[key] ?? min,
+              disabled: !settingsEnabled,
+              onInput: (event) => {
+                const next = Number(event?.target?.value ?? 0);
+                this.updatePreviewSetting(key, next);
+              },
+            }),
+            h(
+              "span",
+              { class: "phg-settings-value" },
+              formatter(Number(settings[key] ?? min))
+          ),
+        ]
+        );
+
+      const positionField = h(
+        "label",
+        {
+          class: [
+            "phg-settings-field",
+            !settingsEnabled ? "phg-settings-field--disabled" : null,
+          ].filter(Boolean),
+        },
+        [
+          h("span", { class: "phg-settings-label" }, "Corner"),
+          h(
+            "select",
+            {
+              value: settings.position || "bottom-left",
+              disabled: !settingsEnabled,
+              onChange: (event) => {
+                const next = event?.target?.value;
+                if (next) {
+                  this.updatePreviewSetting("position", next);
+                }
+              },
+            },
+            (this.previewPositionOptions || []).map((option) =>
+              h("option", { value: option.value }, option.label)
+            )
+          ),
+        ]
+      );
+
+      const enableSwitch = h("label", { class: "phg-switch" }, [
+        h("input", {
+          type: "checkbox",
+          checked: settingsEnabled,
+          onChange: (event) =>
+            this.togglePreviewSettingsEnabled(event?.target?.checked ?? false),
+        }),
+      ]);
+
+      const settingsPanel = h(
+        "section",
+        {
+          class: [
+            "phg-settings",
+            collapsed ? "phg-settings--collapsed" : null,
+          ].filter(Boolean),
+        },
+        [
+          h("header", { class: "phg-settings-header" }, [
+            h("div", { class: "phg-settings-title" }, "Preview Settings"),
+            h("div", { class: "phg-settings-actions" }, [
+              h("div", { class: "phg-switch-label" }, [
+                "Enabled",
+                enableSwitch,
+              ]),
+              h(
+                "button",
+                {
+                  type: "button",
+                  class: "phg-settings-toggle",
+                  onClick: () => this.toggleSettingsCollapsed(),
+                },
+                collapsed ? "Expand" : "Collapse"
+              ),
+            ]),
+          ]),
+          !collapsed
+            ? h("div", { class: "phg-settings-content" }, [
+                h("div", { class: "phg-settings-grid" }, [
+                  rangeField({
+                    label: "Thumbnail Size",
+                    key: "imageSize",
+                    min: 72,
+                    max: 220,
+                    step: 4,
+                    formatter: (value) => `${Math.round(value)} px`,
+                  }),
+                  rangeField({
+                    label: "Display Duration",
+                    key: "displayDuration",
+                    min: 1500,
+                    max: 15000,
+                    step: 500,
+                    formatter: (value) => `${(value / 1000).toFixed(1)} s`,
+                  }),
+                  positionField,
+                ]),
+                h(
+                  "p",
+                  { class: "phg-settings-hint" },
+                  settingsEnabled
+                    ? "Previews close automatically based on the duration above."
+                    : "Preview Settings are disabled; defaults will be used."
+                ),
+              ])
+            : null,
+        ]
+      );
       const createIconButton = ({
         icon,
         label,
@@ -603,6 +787,7 @@ function createHistoryComponent({
       );
 
       return h("div", { class: "phg-container" }, [
+        settingsPanel,
         status,
         this.isLoading
           ? h("div", { class: "phg-message" }, "Loading history…")
@@ -645,6 +830,7 @@ async function registerHistoryTab() {
   const comfyApp = window.comfyAPI?.app?.app ?? null;
   const comfyApi = comfyApp?.api ?? window.comfyAPI?.api?.api ?? null;
   const eventBus = comfyApp?.eventBus ?? null;
+  const historyApi = createHistoryApi(comfyApi);
 
   const vueHelpers = {
     defineComponent: vue.defineComponent,
@@ -663,6 +849,36 @@ async function registerHistoryTab() {
   };
 
   const assetLoader = createAssetLoader("data-phg-asset");
+  if (!previewListenersAttached) {
+    const previewNotifier = createPreviewNotifier({
+      api: comfyApi,
+      historyApi,
+      logger: console,
+    });
+
+    if (previewNotifier) {
+      const previewHandler = (event) => {
+        try {
+          const result =
+            previewNotifier.handleHistoryEvent?.(event) ??
+            previewNotifier.notifyEntryIds?.(extractEntryIds(event));
+          if (result && typeof result.then === "function") {
+            result.catch((error) => {
+              logError("Preview notification failed", error);
+            });
+          }
+        } catch (error) {
+          logError("Preview notification failed", error);
+        }
+      };
+
+      if (comfyApi?.addEventListener) {
+        comfyApi.addEventListener(HISTORY_UPDATE_EVENT, previewHandler);
+      }
+      eventBus?.on?.(HISTORY_UPDATE_EVENT, previewHandler);
+      previewListenersAttached = true;
+    }
+  }
 
   const component = createHistoryComponent({
     api: comfyApi,
@@ -671,6 +887,7 @@ async function registerHistoryTab() {
     eventBus,
     assetLoader,
     comfyApp,
+    historyApi,
   });
 
   workspaceStore.registerSidebarTab({
