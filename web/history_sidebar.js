@@ -59,12 +59,54 @@ async function getVueModule() {
   return cachedVueModule;
 }
 
+function findExportByName(module, targetName) {
+  if (!module) return null;
+  // Direct named export or common short alias.
+  if (module[targetName]) return module[targetName];
+  // Some builds export stores under short keys (e.g. "u", "h", "aj").
+  for (const [key, value] of Object.entries(module)) {
+    if (!value) continue;
+    if (value.name === targetName) return value;
+    if (typeof value === "function" && key.toLowerCase().includes("store")) {
+      if (value.name && value.name.toLowerCase() === targetName.toLowerCase()) {
+        return value;
+      }
+    }
+  }
+  return null;
+}
+
 function resolveWorkspaceStore(module) {
-  return module?.useWorkspaceStore ?? module?.u ?? null;
+  return (
+    findExportByName(module, "useWorkspaceStore") ??
+    // legacy short aliases
+    module?.u ??
+    null
+  );
+}
+
+function resolveSidebarTabStore(module) {
+  const direct =
+    findExportByName(module, "useSidebarTabStore") ??
+    // alias observed in ComfyUI 0.3.75+ bundles
+    module?.o ??
+    null;
+
+  if (typeof direct === "function") {
+    return direct;
+  }
+
+  return null;
 }
 
 function resolveToastStore(module) {
-  return module?.useToastStore ?? module?.a6 ?? null;
+  return (
+    findExportByName(module, "useToastStore") ??
+    // legacy short aliases
+    module?.a6 ??
+    module?.aj ??
+    null
+  );
 }
 
 function createHistoryComponent({
@@ -806,18 +848,31 @@ async function registerHistoryTab() {
   const module = await getMainBundleModule();
   const vue = await getVueModule();
   const useWorkspaceStore = resolveWorkspaceStore(module);
-  if (!useWorkspaceStore) {
-    throw new Error("useWorkspaceStore was not found");
+  const useSidebarTabStore = resolveSidebarTabStore(module);
+
+  if (!useWorkspaceStore && !useSidebarTabStore) {
+    throw new Error("Workspace/Sidebar stores were not found");
   }
 
-  const workspaceStore = useWorkspaceStore();
-  if (!workspaceStore?.registerSidebarTab) {
-    throw new Error("workspaceStore is not initialized");
+  const workspaceStore = useWorkspaceStore ? useWorkspaceStore() : null;
+  const sidebarTabStore = useSidebarTabStore
+    ? useSidebarTabStore()
+    : workspaceStore?.sidebarTab?.value ?? null;
+
+  const registerTab =
+    workspaceStore?.registerSidebarTab ??
+    sidebarTabStore?.registerSidebarTab ??
+    null;
+  if (!registerTab) {
+    throw new Error("registerSidebarTab was not found");
   }
 
-  const existing = workspaceStore
-    .getSidebarTabs()
-    ?.find((tab) => tab.id === TAB_ID);
+  const getTabs =
+    workspaceStore?.getSidebarTabs ??
+    sidebarTabStore?.getSidebarTabs ??
+    (() => sidebarTabStore?.sidebarTabs ?? []);
+
+  const existing = getTabs()?.find((tab) => tab.id === TAB_ID);
   if (existing) {
     isRegistered = true;
     logInfo("History tab already registered");
@@ -825,7 +880,9 @@ async function registerHistoryTab() {
   }
 
   const useToastStore = resolveToastStore(module);
-  const toastStore = useToastStore ? useToastStore() : null;
+  const toastStore = useToastStore
+    ? useToastStore()
+    : workspaceStore?.toast?.value ?? null;
 
   const comfyApp = window.comfyAPI?.app?.app ?? null;
   const comfyApi = comfyApp?.api ?? window.comfyAPI?.api?.api ?? null;
@@ -890,7 +947,7 @@ async function registerHistoryTab() {
     historyApi,
   });
 
-  workspaceStore.registerSidebarTab({
+  registerTab({
     id: TAB_ID,
     icon: "pi pi-clock",
     title: "Prompt History",
@@ -924,13 +981,23 @@ async function attemptRegistration(attempt = 0) {
 logInfo(`${EXTENSION_NAME} loading`);
 const comfyAppInstance = window.comfyAPI?.app?.app;
 if (comfyAppInstance?.registerExtension) {
+  let setupInvoked = false;
+  const runSetup = () => {
+    if (setupInvoked) return;
+    setupInvoked = true;
+    logInfo("setup hook called");
+    attemptRegistration();
+  };
+
   comfyAppInstance.registerExtension({
     name: EXTENSION_NAME,
-    setup() {
-      logInfo("setup hook called");
-      attemptRegistration();
-    },
+    setup: runSetup,
   });
+
+  // Newer ComfyUI frontends (v1.28.8+/ComfyUI 0.3.75+) stopped invoking
+  // extension.setup automatically. Run it once here as a fallback so the
+  // sidebar tab still registers.
+  runSetup();
 } else {
   attemptRegistration();
 }
