@@ -282,14 +282,8 @@
 }
 
 .viewer-container .viewer-navbar .viewer-list > li {
-  width: auto;
   height: 100%;
-}
-
-.viewer-container .viewer-navbar .viewer-list > li img {
-  width: auto;
-  height: 100%;
-  object-fit: contain;
+  width: 6vh;
 }
 
 .phg-preview-host {
