@@ -12,8 +12,36 @@ const HISTORY_LIMIT = 120;
 const HISTORY_WIDGET_FLAG = "__phg_history_widget__";
 const HISTORY_WIDGET_LABEL = "⏱ History";
 
+const TEXT = {
+  title: "Prompt History",
+  subtitleMissing: "No active Prompt History Input — prompts will be copied.",
+  subtitleTarget: (name) => `Sending to: ${name ?? "Prompt History Input"}`,
+  loading: "Loading history…",
+  empty: "No prompt history yet. Run a workflow to populate this list.",
+  copied: "Prompt copied to clipboard.",
+  copiedFallback: "Prompt copied (no active node).",
+  copiedMissingWidget: "Prompt widget missing on node. Copied instead.",
+  copiedMissingNode: "Target node was removed. Prompt copied instead.",
+  sent: (name) => `Prompt sent to ${name ?? "node"}.`,
+  same: "Prompt already matches the node input.",
+  noImages: "No images available for this prompt.",
+  deleteConfirm: "Delete this prompt history entry?",
+  deleteSuccess: "History entry deleted.",
+  deleteError: "Failed to delete entry.",
+};
+
 const logInfo = (...messages) => console.info(LOG_PREFIX, ...messages);
 const logError = (...messages) => console.error(LOG_PREFIX, ...messages);
+
+const createEl = (tag, className = "", text = null) => {
+  const el = document.createElement(tag);
+  if (className) el.className = className;
+  if (text !== null && text !== undefined) el.textContent = text;
+  return el;
+};
+
+const safeText = (value, fallback = "") =>
+  value === null || value === undefined ? fallback : String(value);
 
 function ensureStylesheet() {
   const attr = "data-phg-style";
@@ -224,7 +252,7 @@ class HistoryDialog {
 
   async refresh() {
     this._setLoading(true);
-    this._setMessage("Loading history…", "muted");
+    this._setMessage(TEXT.loading, "muted");
     try {
       const items = await this.historyApi.list(HISTORY_LIMIT);
       this.state.entries = items;
@@ -247,42 +275,29 @@ class HistoryDialog {
   }
 
   _buildLayout() {
-    this.backdrop = document.createElement("div");
-    this.backdrop.className = "phg-dialog-backdrop phg-hidden";
+    this.backdrop = createEl("div", "phg-dialog-backdrop phg-hidden");
     this.backdrop.dataset.phg = "history";
 
-    this.dialog = document.createElement("div");
-    this.dialog.className = "phg-dialog";
+    this.dialog = createEl("div", "phg-dialog");
 
-    const header = document.createElement("header");
-    header.className = "phg-dialog__header";
+    const header = createEl("header", "phg-dialog__header");
 
-    const titleBlock = document.createElement("div");
-    titleBlock.className = "phg-dialog__titles";
-    this.titleEl = document.createElement("div");
-    this.titleEl.className = "phg-dialog__title";
-    this.titleEl.textContent = "Prompt History";
-    this.targetLabel = document.createElement("div");
-    this.targetLabel.className = "phg-dialog__subtitle";
+    const titleBlock = createEl("div", "phg-dialog__titles");
+    this.titleEl = createEl("div", "phg-dialog__title", TEXT.title);
+    this.targetLabel = createEl("div", "phg-dialog__subtitle");
     titleBlock.append(this.titleEl, this.targetLabel);
 
-    const actions = document.createElement("div");
-    actions.className = "phg-dialog__actions";
-
+    const actions = createEl("div", "phg-dialog__actions");
     this.refreshBtn = this._createButton("Refresh", "Reload history", () => this.refresh());
     this.closeBtn = this._createButton("Close", "Close history", () => this.close(), "ghost");
     actions.append(this.refreshBtn, this.closeBtn);
 
     header.append(titleBlock, actions);
 
-    this.statusEl = document.createElement("div");
-    this.statusEl.className = "phg-dialog__status";
+    this.statusEl = createEl("div", "phg-dialog__status");
+    this.listEl = createEl("div", "phg-history-list");
 
-    this.listEl = document.createElement("div");
-    this.listEl.className = "phg-history-list";
-
-    const body = document.createElement("div");
-    body.className = "phg-dialog__body";
+    const body = createEl("div", "phg-dialog__body");
     body.append(this.statusEl, this.listEl);
 
     this.dialog.append(header, body);
@@ -322,6 +337,71 @@ class HistoryDialog {
     return chip;
   }
 
+  _buildActions(entry, sources) {
+    const hasImages = Array.isArray(sources) && sources.length > 0;
+    const actions = createEl("div", "phg-entry-card__actions");
+
+    const useLabel = this.state.target ? "Use" : "Copy";
+    actions.append(
+      this._createButton(
+        useLabel,
+        this.state.target ? "Send prompt to the selected node" : "Copy prompt to clipboard",
+        () => this._handleUse(entry)
+      ),
+      this._createButton("Copy", "Copy prompt", () => this._copyPrompt(entry), "ghost"),
+      (() => {
+        const button = this._createButton(
+          "Gallery",
+          hasImages ? "Open generated images" : TEXT.noImages,
+          () => this._openGallery(entry, sources.length - 1),
+          "ghost"
+        );
+        button.disabled = !hasImages;
+        return button;
+      })(),
+      this._createButton("Delete", "Delete entry", () => this._deleteEntry(entry), "danger")
+    );
+
+    return actions;
+  }
+
+  _buildPreview(preview, entry, sources) {
+    const box = createEl("div", "phg-entry-card__preview");
+    if (!preview) {
+      box.append(createEl("div", "phg-preview-placeholder", "No image"));
+      return box;
+    }
+    const img = createEl("img");
+    img.src = preview.thumb ?? preview.url;
+    img.alt = preview.title ?? "Generated image";
+    img.loading = "lazy";
+    img.addEventListener("click", (event) => {
+      event.stopPropagation();
+      this._openGallery(entry, sources.length - 1);
+    });
+    box.append(img);
+    return box;
+  }
+
+  _buildPrompt(text) {
+    const container = createEl("div", "phg-entry-card__prompt");
+    const pre = createEl("pre");
+    pre.textContent = text ?? "";
+    container.append(pre);
+    return container;
+  }
+
+  _buildTags(tags) {
+    if (!Array.isArray(tags) || !tags.length) return null;
+    const row = createEl("div", "phg-entry-card__tags");
+    for (const tag of tags) {
+      const chip = this._createChip(safeText(tag));
+      chip.classList.add("phg-chip--muted");
+      row.append(chip);
+    }
+    return row;
+  }
+
   _setLoading(value) {
     this.state.loading = Boolean(value);
     this.refreshBtn.disabled = this.state.loading;
@@ -344,9 +424,9 @@ class HistoryDialog {
   _updateTargetLabel() {
     const target = this.state.target;
     if (target) {
-      this.targetLabel.textContent = `Sending to: ${target.nodeTitle ?? "Prompt History Input"}`;
+      this.targetLabel.textContent = TEXT.subtitleTarget(target.nodeTitle);
     } else {
-      this.targetLabel.textContent = "No active Prompt History Input — prompts will be copied.";
+      this.targetLabel.textContent = TEXT.subtitleMissing;
     }
   }
 
@@ -359,13 +439,13 @@ class HistoryDialog {
     }
 
     if (this.state.loading) {
-      this.listEl.appendChild(this._renderMessage("Loading history…", "muted"));
+      this.listEl.appendChild(this._renderMessage(TEXT.loading, "muted"));
       return;
     }
 
     if (!this.state.entries.length) {
       this.listEl.appendChild(
-        this._renderMessage("No prompt history yet. Run a workflow to populate this list.", "muted")
+        this._renderMessage(TEXT.empty, "muted")
       );
       return;
     }
@@ -383,100 +463,29 @@ class HistoryDialog {
   }
 
   _renderEntry(entry) {
-    const article = document.createElement("article");
-    article.className = "phg-entry-card";
-
-    const header = document.createElement("div");
-    header.className = "phg-entry-card__header";
-
-    const stamp = document.createElement("div");
-    stamp.className = "phg-entry-card__stamp";
-    const lastUsed = entry?.last_used_at ?? entry?.created_at;
-    stamp.textContent = formatTimestamp(lastUsed);
-
-    const badges = document.createElement("div");
-    badges.className = "phg-entry-card__badges";
+    const article = createEl("article", "phg-entry-card");
 
     const sources = buildImageSources(entry, this.api);
     const hasImages = sources.length > 0;
     const preview = hasImages ? sources[sources.length - 1] : null; // latest
-    const countChip = this._createChip(
-      hasImages ? `${sources.length} image${sources.length === 1 ? "" : "s"}` : "No images",
-      hasImages ? "accent" : "muted"
+
+    const header = createEl("div", "phg-entry-card__header");
+    const stamp = createEl("div", "phg-entry-card__stamp", formatTimestamp(entry?.last_used_at ?? entry?.created_at));
+    const badges = createEl("div", "phg-entry-card__badges");
+    badges.append(
+      this._createChip(
+        hasImages ? `${sources.length} image${sources.length === 1 ? "" : "s"}` : "No images",
+        hasImages ? "accent" : "muted"
+      )
     );
-    badges.append(countChip);
+    header.append(stamp, badges, this._buildActions(entry, sources));
 
-    const actions = document.createElement("div");
-    actions.className = "phg-entry-card__actions";
+    const body = createEl("div", "phg-entry-card__body");
+    body.append(this._buildPreview(preview, entry, sources), this._buildPrompt(entry.prompt));
 
-    const useLabel = this.state.target ? "Use" : "Copy";
-    const useBtn = this._createButton(
-      useLabel,
-      this.state.target ? "Send prompt to the selected node" : "Copy prompt to clipboard",
-      () => this._handleUse(entry)
-    );
-    actions.appendChild(useBtn);
-
-    const copyBtn = this._createButton("Copy", "Copy prompt", () => this._copyPrompt(entry), "ghost");
-    actions.appendChild(copyBtn);
-
-    const galleryBtn = this._createButton(
-      "Gallery",
-      hasImages ? "Open generated images" : "No generated images",
-      () => this._openGallery(entry, sources.length - 1),
-      "ghost"
-    );
-    galleryBtn.disabled = !hasImages;
-    actions.appendChild(galleryBtn);
-
-    const deleteBtn = this._createButton("Delete", "Delete entry", () => this._deleteEntry(entry), "danger");
-    actions.appendChild(deleteBtn);
-
-    header.append(stamp, badges, actions);
-
-    const body = document.createElement("div");
-    body.className = "phg-entry-card__body";
-
-    const previewBox = document.createElement("div");
-    previewBox.className = "phg-entry-card__preview";
-
-    if (preview) {
-      const img = document.createElement("img");
-      img.src = preview.thumb ?? preview.url;
-      img.alt = preview.title ?? "Generated image";
-      img.loading = "lazy";
-      img.addEventListener("click", (event) => {
-        event.stopPropagation();
-        this._openGallery(entry, sources.length - 1);
-      });
-      previewBox.appendChild(img);
-    } else {
-      const placeholder = document.createElement("div");
-      placeholder.className = "phg-preview-placeholder";
-      placeholder.textContent = "No image";
-      previewBox.appendChild(placeholder);
-    }
-
-    const promptBox = document.createElement("div");
-    promptBox.className = "phg-entry-card__prompt";
-    const pre = document.createElement("pre");
-    pre.textContent = entry.prompt ?? "";
-    promptBox.appendChild(pre);
-
-    body.append(previewBox, promptBox);
-
-    const metaRow = document.createElement("div");
-    metaRow.className = "phg-entry-card__footer";
-    if (Array.isArray(entry.tags) && entry.tags.length) {
-      const tagLine = document.createElement("div");
-      tagLine.className = "phg-entry-card__tags";
-      for (const tag of entry.tags) {
-        const chip = this._createChip(String(tag));
-        chip.classList.add("phg-chip--muted");
-        tagLine.appendChild(chip);
-      }
-      metaRow.appendChild(tagLine);
-    }
+    const metaRow = createEl("div", "phg-entry-card__footer");
+    const tagsRow = this._buildTags(entry.tags);
+    if (tagsRow) metaRow.append(tagsRow);
 
     article.append(header, body, metaRow);
     return article;
@@ -487,7 +496,7 @@ class HistoryDialog {
     const target = this.state.target;
     if (!target) {
       await this._copyPrompt(entry);
-      this._setMessage("Prompt copied (no active node).", "info");
+      this._setMessage(TEXT.copiedFallback, "info");
       this.close();
       return;
     }
@@ -497,7 +506,7 @@ class HistoryDialog {
       this.state.target = null;
       this._updateTargetLabel();
       await this._copyPrompt(entry);
-      this._setMessage("Target node was removed. Prompt copied instead.", "warn");
+      this._setMessage(TEXT.copiedMissingNode, "warn");
       this.close();
       return;
     }
@@ -505,7 +514,7 @@ class HistoryDialog {
     const widget = node.widgets?.find((item) => item?.name === target.widgetName) ?? resolvePromptWidget(node);
     if (!widget) {
       await this._copyPrompt(entry);
-      this._setMessage("Prompt widget missing on node. Copied instead.", "warn");
+      this._setMessage(TEXT.copiedMissingWidget, "warn");
       this.close();
       return;
     }
@@ -514,9 +523,9 @@ class HistoryDialog {
     this.state.target = normalizeTargetPayload(node) ?? null;
     this._updateTargetLabel();
     if (updated) {
-      this._setMessage(`Prompt sent to ${this.state.target?.nodeTitle ?? "node"}.`, "success");
+      this._setMessage(TEXT.sent(this.state.target?.nodeTitle), "success");
     } else {
-      this._setMessage("Prompt already matches the node input.", "muted");
+      this._setMessage(TEXT.same, "muted");
     }
     this.close();
   }
@@ -524,7 +533,7 @@ class HistoryDialog {
   async _copyPrompt(entry) {
     try {
       await navigator.clipboard.writeText(entry.prompt ?? "");
-      this._setMessage("Prompt copied to clipboard.", "info");
+      this._setMessage(TEXT.copied, "info");
     } catch (error) {
       logError("copyPrompt error", error);
       this._setMessage("Failed to copy prompt.", "error");
@@ -533,23 +542,23 @@ class HistoryDialog {
 
   async _deleteEntry(entry) {
     if (!entry?.id) return;
-    if (!window.confirm("Delete this prompt history entry?")) return;
+    if (!window.confirm(TEXT.deleteConfirm)) return;
     try {
       await this.historyApi.remove(entry.id);
       this.state.entries = this.state.entries.filter((item) => item.id !== entry.id);
       this.viewer.close();
       this._renderEntries();
-      this._setMessage("History entry deleted.", "success");
+      this._setMessage(TEXT.deleteSuccess, "success");
     } catch (error) {
       logError("delete error", error);
-      this._setMessage("Failed to delete entry.", "error");
+      this._setMessage(TEXT.deleteError, "error");
     }
   }
 
   async _openGallery(entry, startIndex = 0) {
     const sources = buildImageSources(entry, this.api);
     if (!sources.length) {
-      this._setMessage("No images available for this prompt.", "warn");
+      this._setMessage(TEXT.noImages, "warn");
       return;
     }
     try {
