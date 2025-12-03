@@ -5,10 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
-from .storage import (
-    consume_prompt_entries,
-    get_prompt_history_storage,
-)
+from .storage import consume_prompt_entries, get_prompt_history_storage
 
 LOGGER = logging.getLogger(__name__)
 
@@ -66,6 +63,38 @@ def _extract_prompt_texts(prompt_payload: Any) -> List[str]:
     return prompts
 
 
+def _resolve_entry_ids(
+    prompt_id: Optional[str],
+    prompt_payload: Any,
+    storage,
+) -> List[str]:
+    """
+    Derive history entry ids associated with a completed prompt.
+    """
+    entry_ids = consume_prompt_entries(prompt_id)
+    if entry_ids:
+        return entry_ids
+
+    prompt_texts = _extract_prompt_texts(prompt_payload)
+    if not prompt_texts:
+        return []
+
+    resolved = storage.find_entry_ids_for_prompts(prompt_texts)
+    return list(resolved.values())
+
+
+def _notify_clients(server: Optional[Any], entry_ids: List[str], files: List[Dict[str, Any]]) -> None:
+    if server is None or not entry_ids:
+        return
+    try:
+        payload: Dict[str, Any] = {"entry_ids": list(entry_ids)}
+        if files:
+            payload["files"] = [dict(item) for item in files]
+        server.send_sync("PromptHistoryGallery.updated", payload)
+    except Exception:  # pragma: no cover
+        LOGGER.exception("Failed to notify clients about history update")
+
+
 def handle_prompt_completion(
     prompt_id: Optional[str],
     history_result: Any,
@@ -74,13 +103,7 @@ def handle_prompt_completion(
 ) -> None:
     storage = get_prompt_history_storage()
 
-    entry_ids = consume_prompt_entries(prompt_id)
-    if not entry_ids:
-        prompt_texts = _extract_prompt_texts(prompt_payload)
-        if prompt_texts:
-            resolved = storage.find_entry_ids_for_prompts(prompt_texts)
-            entry_ids = list(resolved.values())
-
+    entry_ids = _resolve_entry_ids(prompt_id, prompt_payload, storage)
     if not entry_ids:
         return
 
@@ -89,12 +112,4 @@ def handle_prompt_completion(
         storage.add_outputs_for_entries(entry_ids, files)
 
     storage.touch_entries(entry_ids)
-
-    if server is not None:
-        try:
-            payload: Dict[str, Any] = {"entry_ids": list(entry_ids)}
-            if files:
-                payload["files"] = [dict(item) for item in files]
-            server.send_sync("PromptHistoryGallery.updated", payload)
-        except Exception:  # pragma: no cover
-            LOGGER.exception("Failed to notify clients about history update")
+    _notify_clients(server, entry_ids, files)

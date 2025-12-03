@@ -30,14 +30,18 @@ export function createHistoryApi(api) {
     return response.statusText;
   };
 
+  const request = async (path, { parseJson = false, ...options } = {}) => {
+    const handled = await handleResponse(await fetcher(path, options));
+    return parseJson ? handled.json() : handled;
+  };
+
   return {
     async list(limit = DEFAULT_LIMIT) {
       const safeLimit = Math.max(1, Math.min(Number(limit) || DEFAULT_LIMIT, 200));
-      const response = await fetcher(`/prompt-history?limit=${safeLimit}`, {
+      const payload = await request(`/prompt-history?limit=${safeLimit}`, {
         method: "GET",
+        parseJson: true,
       });
-      const handled = await handleResponse(response);
-      const payload = await handled.json();
       const entries = Array.isArray(payload?.entries) ? payload.entries : [];
       return entries;
     },
@@ -46,17 +50,15 @@ export function createHistoryApi(api) {
       if (!entryId) {
         throw new Error("Entry id is required.");
       }
-      const response = await fetcher(`/prompt-history/${entryId}`, {
+      await request(`/prompt-history/${entryId}`, {
         method: "DELETE",
       });
-      await handleResponse(response);
     },
 
     async clear() {
-      const response = await fetcher("/prompt-history", {
+      await request("/prompt-history", {
         method: "DELETE",
       });
-      await handleResponse(response);
     },
   };
 }
