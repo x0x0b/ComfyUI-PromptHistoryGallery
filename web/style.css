@@ -267,7 +267,7 @@
 .phg-tag {
   padding: 0.15rem 0.5rem;
   border-radius: 9999px;
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.08)
   font-size: 0.7rem;
 }
 
@@ -293,7 +293,7 @@
   display: flex;
   flex-direction: column;
   gap: 0.65rem;
-  z-index: 2147483647;
+  z-index: 2147483500;
   pointer-events: none;
 }
 
@@ -394,5 +394,275 @@
   to {
     opacity: 0;
     transform: translateY(10px) scale(0.96);
+  }
+}
+
+/* Node dialog overlay */
+.phg-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: radial-gradient(circle at 20% 20%, rgba(56, 189, 248, 0.08), transparent 35%),
+    radial-gradient(circle at 80% 10%, rgba(94, 234, 212, 0.08), transparent 35%),
+    rgba(6, 8, 18, 0.8);
+  backdrop-filter: blur(4px);
+  z-index: 2147483650;
+}
+
+/* Ensure the Viewer.js lightbox sits above the Prompt History dialog */
+.viewer-container {
+  z-index: 2147483700 !important;
+}
+
+.phg-hidden {
+  display: none !important;
+}
+
+.phg-dialog {
+  width: min(1080px, 94vw);
+  max-height: 86vh;
+  background: linear-gradient(145deg, rgba(15, 23, 42, 0.92), rgba(15, 18, 32, 0.95));
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.55);
+  border-radius: 18px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  color: var(--p-text-color, #e5e7eb);
+}
+
+.phg-dialog__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.phg-dialog__titles {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.phg-dialog__title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.phg-dialog__subtitle {
+  font-size: 0.9rem;
+  opacity: 0.8;
+}
+
+.phg-dialog__actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.phg-dialog__body {
+  padding: 0.6rem 1.25rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-height: 320px;
+}
+
+.phg-dialog__status {
+  min-height: 1.25rem;
+  font-size: 0.9rem;
+  opacity: 0.9;
+}
+
+.phg-dialog__status[data-tone="error"] {
+  color: var(--p-red-300, #fca5a5);
+}
+
+.phg-dialog__status[data-tone="warn"] {
+  color: var(--p-yellow-200, #fcd34d);
+}
+
+.phg-dialog__status[data-tone="success"] {
+  color: var(--p-green-200, #a7f3d0);
+}
+
+.phg-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  overflow: auto;
+  padding-right: 0.35rem;
+}
+
+.phg-entry-card {
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 14px;
+  padding: 0.9rem;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.85rem;
+}
+
+.phg-entry-card__header {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 0.5rem 0.75rem;
+  align-items: center;
+}
+
+.phg-entry-card__stamp {
+  font-size: 0.9rem;
+  opacity: 0.78;
+  white-space: nowrap;
+}
+
+.phg-entry-card__badges {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.phg-entry-card__actions {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.phg-entry-card__body {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  gap: 0.75rem;
+  align-items: stretch;
+}
+
+.phg-entry-card__preview {
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  min-height: 160px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.phg-entry-card__preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  cursor: pointer;
+  transition: transform 0.15s ease, filter 0.2s ease;
+}
+
+.phg-entry-card__preview img:hover {
+  transform: scale(1.01);
+  filter: saturate(1.04);
+}
+
+.phg-entry-card__prompt pre {
+  margin: 0;
+  padding: 0.7rem;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  font-family: var(--p-font-family, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace);
+  font-size: 0.9rem;
+  line-height: 1.45;
+  color: inherit;
+  white-space: pre-wrap;
+}
+
+.phg-entry-card__footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.phg-entry-card__tags {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.phg-button {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.16), rgba(56, 189, 248, 0.32));
+  color: var(--p-text-color, #e5e7eb);
+  border-radius: 9999px;
+  padding: 0.35rem 0.9rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: transform 0.12s ease, border-color 0.12s ease, background 0.15s ease;
+}
+
+.phg-button:hover {
+  transform: translateY(-1px);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.phg-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.phg-button--ghost {
+  background: transparent;
+}
+
+.phg-button--danger {
+  background: linear-gradient(135deg, rgba(248, 113, 113, 0.24), rgba(248, 113, 113, 0.38));
+  border-color: rgba(248, 113, 113, 0.35);
+}
+
+.phg-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.65rem;
+  border-radius: 9999px;
+  font-size: 0.8rem;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.phg-chip--muted {
+  opacity: 0.75;
+}
+
+.phg-chip--accent {
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.25), rgba(56, 189, 248, 0.4));
+  border-color: rgba(56, 189, 248, 0.35);
+}
+
+.phg-preview-placeholder {
+  font-size: 0.85rem;
+  opacity: 0.7;
+}
+
+.phg-message--muted {
+  opacity: 0.8;
+}
+
+@media (max-width: 900px) {
+  .phg-entry-card__body {
+    grid-template-columns: 1fr;
+  }
+
+  .phg-entry-card__header {
+    grid-template-columns: 1fr;
+    justify-items: flex-start;
+  }
+
+  .phg-entry-card__actions {
+    justify-content: flex-start;
   }
 }

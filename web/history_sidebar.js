@@ -1,28 +1,19 @@
-import { createAssetLoader } from "./lib/assetLoader.js";
 import { createHistoryApi } from "./lib/historyApi.js";
 import { buildImageSources } from "./lib/imageSources.js";
 import { createViewerBridge } from "./lib/viewerBridge.js";
-import {
-  createPreviewNotifier,
-  extractEntryIds,
-} from "./lib/previewNotifier.js";
-import {
-  getPreviewSettingsStore,
-  PREVIEW_POSITIONS,
-} from "./lib/previewSettings.js";
+import { createPreviewNotifier, extractEntryIds } from "./lib/previewNotifier.js";
 
 export {};
 
 const LOG_PREFIX = "[PromptHistoryGallery]";
-const EXTENSION_NAME = "PromptHistoryGallery.Sidebar";
-const TAB_ID = "prompt-history-gallery";
+const EXTENSION_NAME = "PromptHistoryGallery.NodeDialog";
 const HISTORY_UPDATE_EVENT = "PromptHistoryGallery.updated";
+const HISTORY_LIMIT = 120;
+const HISTORY_WIDGET_FLAG = "__phg_history_widget__";
+const HISTORY_WIDGET_LABEL = "⏱ History";
 
 const logInfo = (...messages) => console.info(LOG_PREFIX, ...messages);
 const logError = (...messages) => console.error(LOG_PREFIX, ...messages);
-
-let isRegistered = false;
-let previewListenersAttached = false;
 
 function ensureStylesheet() {
   const attr = "data-phg-style";
@@ -35,969 +26,651 @@ function ensureStylesheet() {
   document.head.appendChild(link);
 }
 
-function resolveMainBundleScript() {
-  return document.querySelector(
-    'script[type="module"][src*="assets/index-"]'
-  )?.src;
-}
-
-let cachedMainModule = null;
-async function getMainBundleModule() {
-  if (cachedMainModule) return cachedMainModule;
-  const scriptSrc = resolveMainBundleScript();
-  if (!scriptSrc) {
-    throw new Error("Main bundle script not found");
+function formatTimestamp(value) {
+  if (!value) return "Unknown";
+  try {
+    return new Date(value).toLocaleString();
+  } catch (_) {
+    return String(value);
   }
-  cachedMainModule = await import(/* @vite-ignore */ scriptSrc);
-  return cachedMainModule;
 }
 
-let cachedVueModule = null;
-async function getVueModule() {
-  if (cachedVueModule) return cachedVueModule;
-  cachedVueModule = await import("vue");
-  return cachedVueModule;
+function resolveComfyApp() {
+  return window.comfyAPI?.app?.app ?? window.app ?? null;
 }
 
-function findExportByName(module, targetName) {
-  if (!module) return null;
-  // Direct named export or common short alias.
-  if (module[targetName]) return module[targetName];
-  // Some builds export stores under short keys (e.g. "u", "h", "aj").
-  for (const [key, value] of Object.entries(module)) {
-    if (!value) continue;
-    if (value.name === targetName) return value;
-    if (typeof value === "function" && key.toLowerCase().includes("store")) {
-      if (value.name && value.name.toLowerCase() === targetName.toLowerCase()) {
-        return value;
+function resolveComfyApi() {
+  const comfyApp = resolveComfyApp();
+  return (
+    comfyApp?.api ??
+    window.comfyAPI?.api?.api ??
+    window.comfyAPI?.api ??
+    null
+  );
+}
+
+function resolvePromptWidget(node) {
+  if (!node?.widgets || !Array.isArray(node.widgets)) return null;
+  return node.widgets.find((widget) => widget?.name === "prompt") ?? null;
+}
+
+function normalizeTargetPayload(node) {
+  if (!node) return null;
+  const widget = resolvePromptWidget(node);
+  const nodeId = node.id ?? null;
+  if (nodeId == null || !widget) return null;
+  const nodeTitle =
+    typeof node.getTitle === "function"
+      ? node.getTitle()
+      : node.title ?? node.comfyClass ?? "Prompt History Input";
+  return {
+    nodeId,
+    graph: node.graph ?? null,
+    nodeRef: node,
+    widgetName: widget.name ?? "prompt",
+    nodeTitle,
+  };
+}
+
+function resolveNodeFromTarget(target) {
+  if (!target) return null;
+  const comfyApp = resolveComfyApp();
+  const { nodeRef, nodeId, graph } = target;
+
+  const resolveFromGraph = (graphInstance) => {
+    if (!graphInstance?.getNodeById) return null;
+    try {
+      return graphInstance.getNodeById(nodeId) ?? null;
+    } catch (error) {
+      logError("resolveNodeFromTarget getNodeById error", error);
+      return null;
+    }
+  };
+
+  let node = resolveFromGraph(graph);
+  if (!node && nodeRef?.graph) {
+    node = resolveFromGraph(nodeRef.graph);
+  }
+  if (!node && comfyApp?.graph) {
+    node = resolveFromGraph(comfyApp.graph);
+  }
+  if (!node && Array.isArray(comfyApp?.graph?.nodes)) {
+    node = comfyApp.graph.nodes.find((candidate) => candidate?.id === nodeId) ?? null;
+  }
+  if (!node && nodeRef) {
+    node = nodeRef;
+  }
+  return node ?? null;
+}
+
+function applyPromptToWidget(node, widget, promptText) {
+  if (!node || !widget) return false;
+  const normalized =
+    typeof promptText === "string" ? promptText : String(promptText ?? "");
+  const previous = typeof widget.value === "string" ? widget.value : widget.value ?? "";
+  if (previous === normalized) {
+    return false;
+  }
+
+  let handled = false;
+  const comfyApp = resolveComfyApp();
+  if (typeof widget.setValue === "function") {
+    try {
+      widget.setValue(normalized, {
+        node,
+        canvas: comfyApp?.canvas ?? null,
+      });
+      handled = true;
+    } catch (error) {
+      logError("applyPromptToWidget.setValue error", error);
+    }
+  }
+
+  if (!handled) {
+    try {
+      widget.value = normalized;
+      handled = true;
+    } catch (error) {
+      logError("applyPromptToWidget.value assignment error", error);
+      return false;
+    }
+    if (typeof widget.callback === "function") {
+      try {
+        widget.callback(
+          widget.value,
+          comfyApp?.canvas ?? null,
+          node,
+          comfyApp?.canvas?.graph_mouse ?? null,
+          null
+        );
+      } catch (error) {
+        logError("applyPromptToWidget.callback error", error);
+      }
+    }
+    if (typeof node.onWidgetChanged === "function") {
+      try {
+        node.onWidgetChanged(widget.name ?? "", widget.value, previous, widget);
+      } catch (error) {
+        logError("applyPromptToWidget.onWidgetChanged error", error);
       }
     }
   }
-  return null;
-}
 
-function resolveWorkspaceStore(module) {
-  return (
-    findExportByName(module, "useWorkspaceStore") ??
-    // legacy short aliases
-    module?.u ??
-    null
-  );
-}
-
-function resolveSidebarTabStore(module) {
-  const direct =
-    findExportByName(module, "useSidebarTabStore") ??
-    // alias observed in ComfyUI 0.3.75+ bundles
-    module?.o ??
-    null;
-
-  if (typeof direct === "function") {
-    return direct;
+  if (Array.isArray(node.widgets_values)) {
+    const index = node.widgets?.indexOf?.(widget) ?? -1;
+    if (index !== -1) {
+      node.widgets_values[index] = widget.value;
+    }
   }
 
-  return null;
+  node.setDirtyCanvas?.(true, true);
+  node.graph?.setDirtyCanvas?.(true, true);
+  if (node.graph) {
+    node.graph._version = (node.graph._version ?? 0) + 1;
+  }
+  return true;
 }
 
-function resolveToastStore(module) {
-  return (
-    findExportByName(module, "useToastStore") ??
-    // legacy short aliases
-    module?.a6 ??
-    module?.aj ??
-    null
-  );
+class HistoryDialog {
+  constructor({ api, comfyApp }) {
+    ensureStylesheet();
+    this.api = api ?? resolveComfyApi();
+    this.comfyApp = comfyApp ?? resolveComfyApp();
+    this.historyApi = createHistoryApi(this.api);
+    this.viewer = createViewerBridge({
+      cssUrl: new URL("./vendor/viewerjs/viewer.min.css", import.meta.url).href,
+      scriptUrl: new URL("./vendor/viewerjs/viewer.min.js", import.meta.url).href,
+    });
+
+    this.state = {
+      isOpen: false,
+      loading: false,
+      error: "",
+      entries: [],
+      target: null,
+    };
+
+    this.messageTimeout = null;
+    this._buildLayout();
+    this._updateTargetLabel();
+  }
+
+  openWithNode(node) {
+    this.state.target = normalizeTargetPayload(node) ?? null;
+    this._updateTargetLabel();
+    this.open();
+  }
+
+  open() {
+    if (this.state.isOpen) {
+      this.refresh();
+      return;
+    }
+    this.state.isOpen = true;
+    this.backdrop.classList.remove("phg-hidden");
+    this.refresh();
+  }
+
+  close() {
+    if (!this.state.isOpen) return;
+    this.state.isOpen = false;
+    this.backdrop.classList.add("phg-hidden");
+    this.viewer.close();
+  }
+
+  isOpen() {
+    return this.state.isOpen;
+  }
+
+  async refresh() {
+    this._setLoading(true);
+    this._setMessage("Loading history…", "muted");
+    try {
+      const items = await this.historyApi.list(HISTORY_LIMIT);
+      this.state.entries = items;
+      this.state.error = "";
+      this._setMessage("");
+    } catch (error) {
+      logError("refresh error", error);
+      this.state.error = error?.message ?? "Failed to load prompt history.";
+      this._setMessage(this.state.error, "error");
+    } finally {
+      this._setLoading(false);
+      this._renderEntries();
+    }
+  }
+
+  refreshIfOpen() {
+    if (this.state.isOpen) {
+      this.refresh();
+    }
+  }
+
+  _buildLayout() {
+    this.backdrop = document.createElement("div");
+    this.backdrop.className = "phg-dialog-backdrop phg-hidden";
+    this.backdrop.dataset.phg = "history";
+
+    this.dialog = document.createElement("div");
+    this.dialog.className = "phg-dialog";
+
+    const header = document.createElement("header");
+    header.className = "phg-dialog__header";
+
+    const titleBlock = document.createElement("div");
+    titleBlock.className = "phg-dialog__titles";
+    this.titleEl = document.createElement("div");
+    this.titleEl.className = "phg-dialog__title";
+    this.titleEl.textContent = "Prompt History";
+    this.targetLabel = document.createElement("div");
+    this.targetLabel.className = "phg-dialog__subtitle";
+    titleBlock.append(this.titleEl, this.targetLabel);
+
+    const actions = document.createElement("div");
+    actions.className = "phg-dialog__actions";
+
+    this.refreshBtn = this._createButton("Refresh", "Reload history", () => this.refresh());
+    this.closeBtn = this._createButton("Close", "Close history", () => this.close(), "ghost");
+    actions.append(this.refreshBtn, this.closeBtn);
+
+    header.append(titleBlock, actions);
+
+    this.statusEl = document.createElement("div");
+    this.statusEl.className = "phg-dialog__status";
+
+    this.listEl = document.createElement("div");
+    this.listEl.className = "phg-history-list";
+
+    const body = document.createElement("div");
+    body.className = "phg-dialog__body";
+    body.append(this.statusEl, this.listEl);
+
+    this.dialog.append(header, body);
+    this.backdrop.appendChild(this.dialog);
+    document.body.appendChild(this.backdrop);
+
+    this.backdrop.addEventListener("click", (event) => {
+      if (event.target === this.backdrop) {
+        this.close();
+      }
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && this.state.isOpen) {
+        this.close();
+      }
+    });
+  }
+
+  _createButton(label, title, onClick, variant = "primary") {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `phg-button phg-button--${variant}`;
+    button.textContent = label;
+    button.title = title;
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      onClick?.();
+    });
+    return button;
+  }
+
+  _createChip(label, variant = "") {
+    const chip = document.createElement("span");
+    chip.className = "phg-chip" + (variant ? ` phg-chip--${variant}` : "");
+    chip.textContent = label;
+    return chip;
+  }
+
+  _setLoading(value) {
+    this.state.loading = Boolean(value);
+    this.refreshBtn.disabled = this.state.loading;
+  }
+
+  _setMessage(text, tone = "") {
+    if (this.messageTimeout) {
+      clearTimeout(this.messageTimeout);
+      this.messageTimeout = null;
+    }
+    this.statusEl.textContent = text || "";
+    this.statusEl.dataset.tone = tone || "";
+    if (text) {
+      this.messageTimeout = setTimeout(() => {
+        this.statusEl.textContent = "";
+      }, 3200);
+    }
+  }
+
+  _updateTargetLabel() {
+    const target = this.state.target;
+    if (target) {
+      this.targetLabel.textContent = `Sending to: ${target.nodeTitle ?? "Prompt History Input"}`;
+    } else {
+      this.targetLabel.textContent = "No active Prompt History Input — prompts will be copied.";
+    }
+  }
+
+  _renderEntries() {
+    this.listEl.innerHTML = "";
+
+    if (this.state.error) {
+      this.listEl.appendChild(this._renderMessage(this.state.error, "error"));
+      return;
+    }
+
+    if (this.state.loading) {
+      this.listEl.appendChild(this._renderMessage("Loading history…", "muted"));
+      return;
+    }
+
+    if (!this.state.entries.length) {
+      this.listEl.appendChild(
+        this._renderMessage("No prompt history yet. Run a workflow to populate this list.", "muted")
+      );
+      return;
+    }
+
+    for (const entry of this.state.entries) {
+      this.listEl.appendChild(this._renderEntry(entry));
+    }
+  }
+
+  _renderMessage(text, tone = "") {
+    const box = document.createElement("div");
+    box.className = "phg-message" + (tone ? ` phg-message--${tone}` : "");
+    box.textContent = text;
+    return box;
+  }
+
+  _renderEntry(entry) {
+    const article = document.createElement("article");
+    article.className = "phg-entry-card";
+
+    const header = document.createElement("div");
+    header.className = "phg-entry-card__header";
+
+    const stamp = document.createElement("div");
+    stamp.className = "phg-entry-card__stamp";
+    const lastUsed = entry?.last_used_at ?? entry?.created_at;
+    stamp.textContent = formatTimestamp(lastUsed);
+
+    const badges = document.createElement("div");
+    badges.className = "phg-entry-card__badges";
+
+    const sources = buildImageSources(entry, this.api);
+    const hasImages = sources.length > 0;
+    const preview = hasImages ? sources[sources.length - 1] : null; // latest
+    const countChip = this._createChip(
+      hasImages ? `${sources.length} image${sources.length === 1 ? "" : "s"}` : "No images",
+      hasImages ? "accent" : "muted"
+    );
+    badges.append(countChip);
+
+    const actions = document.createElement("div");
+    actions.className = "phg-entry-card__actions";
+
+    const useLabel = this.state.target ? "Use" : "Copy";
+    const useBtn = this._createButton(
+      useLabel,
+      this.state.target ? "Send prompt to the selected node" : "Copy prompt to clipboard",
+      () => this._handleUse(entry)
+    );
+    actions.appendChild(useBtn);
+
+    const copyBtn = this._createButton("Copy", "Copy prompt", () => this._copyPrompt(entry), "ghost");
+    actions.appendChild(copyBtn);
+
+    const galleryBtn = this._createButton(
+      "Gallery",
+      hasImages ? "Open generated images" : "No generated images",
+      () => this._openGallery(entry, sources.length - 1),
+      "ghost"
+    );
+    galleryBtn.disabled = !hasImages;
+    actions.appendChild(galleryBtn);
+
+    const deleteBtn = this._createButton("Delete", "Delete entry", () => this._deleteEntry(entry), "danger");
+    actions.appendChild(deleteBtn);
+
+    header.append(stamp, badges, actions);
+
+    const body = document.createElement("div");
+    body.className = "phg-entry-card__body";
+
+    const previewBox = document.createElement("div");
+    previewBox.className = "phg-entry-card__preview";
+
+    if (preview) {
+      const img = document.createElement("img");
+      img.src = preview.thumb ?? preview.url;
+      img.alt = preview.title ?? "Generated image";
+      img.loading = "lazy";
+      img.addEventListener("click", (event) => {
+        event.stopPropagation();
+        this._openGallery(entry, sources.length - 1);
+      });
+      previewBox.appendChild(img);
+    } else {
+      const placeholder = document.createElement("div");
+      placeholder.className = "phg-preview-placeholder";
+      placeholder.textContent = "No image";
+      previewBox.appendChild(placeholder);
+    }
+
+    const promptBox = document.createElement("div");
+    promptBox.className = "phg-entry-card__prompt";
+    const pre = document.createElement("pre");
+    pre.textContent = entry.prompt ?? "";
+    promptBox.appendChild(pre);
+
+    body.append(previewBox, promptBox);
+
+    const metaRow = document.createElement("div");
+    metaRow.className = "phg-entry-card__footer";
+    if (Array.isArray(entry.tags) && entry.tags.length) {
+      const tagLine = document.createElement("div");
+      tagLine.className = "phg-entry-card__tags";
+      for (const tag of entry.tags) {
+        const chip = this._createChip(String(tag));
+        chip.classList.add("phg-chip--muted");
+        tagLine.appendChild(chip);
+      }
+      metaRow.appendChild(tagLine);
+    }
+
+    article.append(header, body, metaRow);
+    return article;
+  }
+
+  async _handleUse(entry) {
+    if (!entry) return;
+    const target = this.state.target;
+    if (!target) {
+      await this._copyPrompt(entry);
+      this._setMessage("Prompt copied (no active node).", "info");
+      this.close();
+      return;
+    }
+
+    const node = resolveNodeFromTarget(target);
+    if (!node) {
+      this.state.target = null;
+      this._updateTargetLabel();
+      await this._copyPrompt(entry);
+      this._setMessage("Target node was removed. Prompt copied instead.", "warn");
+      this.close();
+      return;
+    }
+
+    const widget = node.widgets?.find((item) => item?.name === target.widgetName) ?? resolvePromptWidget(node);
+    if (!widget) {
+      await this._copyPrompt(entry);
+      this._setMessage("Prompt widget missing on node. Copied instead.", "warn");
+      this.close();
+      return;
+    }
+
+    const updated = applyPromptToWidget(node, widget, entry.prompt ?? "");
+    this.state.target = normalizeTargetPayload(node) ?? null;
+    this._updateTargetLabel();
+    if (updated) {
+      this._setMessage(`Prompt sent to ${this.state.target?.nodeTitle ?? "node"}.`, "success");
+    } else {
+      this._setMessage("Prompt already matches the node input.", "muted");
+    }
+    this.close();
+  }
+
+  async _copyPrompt(entry) {
+    try {
+      await navigator.clipboard.writeText(entry.prompt ?? "");
+      this._setMessage("Prompt copied to clipboard.", "info");
+    } catch (error) {
+      logError("copyPrompt error", error);
+      this._setMessage("Failed to copy prompt.", "error");
+    }
+  }
+
+  async _deleteEntry(entry) {
+    if (!entry?.id) return;
+    if (!window.confirm("Delete this prompt history entry?")) return;
+    try {
+      await this.historyApi.remove(entry.id);
+      this.state.entries = this.state.entries.filter((item) => item.id !== entry.id);
+      this.viewer.close();
+      this._renderEntries();
+      this._setMessage("History entry deleted.", "success");
+    } catch (error) {
+      logError("delete error", error);
+      this._setMessage("Failed to delete entry.", "error");
+    }
+  }
+
+  async _openGallery(entry, startIndex = 0) {
+    const sources = buildImageSources(entry, this.api);
+    if (!sources.length) {
+      this._setMessage("No images available for this prompt.", "warn");
+      return;
+    }
+    try {
+      await this.viewer.open(entry.id ?? null, sources, Math.max(0, startIndex));
+    } catch (error) {
+      logError("openGallery error", error);
+      this._setMessage("Failed to open gallery.", "error");
+    }
+  }
 }
 
-function createHistoryComponent({
-  api,
-  toastStore,
-  vueHelpers,
-  eventBus,
-  assetLoader,
-  comfyApp,
-  historyApi: injectedHistoryApi = null,
-}) {
-  const {
-    defineComponent,
-    ref,
-    computed,
-    nextTick,
-    onMounted,
-    onBeforeUnmount,
-    h,
-  } = vueHelpers;
+let dialogInstance = null;
+let listenersAttached = false;
+let previewNotifierInstance = null;
 
-  const viewerBridge = createViewerBridge({
-    cssUrl: new URL("./vendor/viewerjs/viewer.min.css", import.meta.url).href,
-    scriptUrl: new URL("./vendor/viewerjs/viewer.min.js", import.meta.url).href,
-    assetLoader,
+function ensureDialog() {
+  if (!dialogInstance) {
+    dialogInstance = new HistoryDialog({ api: resolveComfyApi(), comfyApp: resolveComfyApp() });
+  }
+  return dialogInstance;
+}
+
+function attachUpdateListeners(api, eventBus) {
+  if (listenersAttached) return;
+  const dialog = ensureDialog();
+  previewNotifierInstance = createPreviewNotifier({
+    api,
+    historyApi: dialog.historyApi,
+    logger: console,
   });
 
-  const historyApi = injectedHistoryApi ?? createHistoryApi(api);
+  const handler = (event) => {
+    dialog.refreshIfOpen();
+    if (!previewNotifierInstance) return;
+    try {
+      const result =
+        previewNotifierInstance.handleHistoryEvent?.(event) ??
+        previewNotifierInstance.notifyEntryIds?.(extractEntryIds(event));
+      if (result && typeof result.then === "function") {
+        result.catch((error) => logError("preview handler error", error));
+      }
+    } catch (error) {
+      logError("preview handler error", error);
+    }
+  };
 
-  return defineComponent({
-    name: "PromptHistorySidebar",
-    setup() {
-      const entries = ref([]);
-      const isLoading = ref(false);
-      const errorMessage = ref("");
-      const limit = ref(50);
-      const previewSettingsStore = getPreviewSettingsStore();
-      const previewSettings = ref(
-        previewSettingsStore?.getState?.() ?? {}
-      );
-      let settingsUnsubscribe = null;
-      const settingsCollapsed = ref(true);
-
-      const hasEntries = computed(() => entries.value.length > 0);
-      const activePromptTarget = ref(null);
-      const hasActivePromptTarget = computed(
-        () => activePromptTarget.value != null
-      );
-
-      const resolvePromptWidget = (node) => {
-        if (!node?.widgets || !Array.isArray(node.widgets)) return null;
-        return node.widgets.find((widget) => widget?.name === "prompt") ?? null;
-      };
-
-      const resolveSelectedPromptNode = () => {
-        const canvas = comfyApp?.canvas ?? null;
-        if (!canvas?.selected_nodes) return null;
-        const selectedNodes = canvas.selected_nodes;
-        const candidates = Array.isArray(selectedNodes)
-          ? selectedNodes
-          : Object.values(selectedNodes);
-        for (const candidate of candidates) {
-          if (candidate?.comfyClass !== "PromptHistoryInput") continue;
-          const widget = resolvePromptWidget(candidate);
-          if (widget) {
-            return { node: candidate, widget };
-          }
-        }
-        return null;
-      };
-
-      const normalizeTargetPayload = (node, widget) => {
-        if (!node || !widget) return null;
-        const nodeId = node.id ?? null;
-        if (nodeId == null) return null;
-        const nodeTitle =
-          typeof node.getTitle === "function"
-            ? node.getTitle()
-            : node.title ?? node.comfyClass ?? "Prompt History Input";
-        return {
-          nodeId,
-          graph: node.graph ?? null,
-          nodeRef: node,
-          widgetName: widget.name ?? "prompt",
-          nodeTitle,
-        };
-      };
-
-      const updateActivePromptTarget = () => {
-        const resolved = resolveSelectedPromptNode();
-        if (!resolved) {
-          if (activePromptTarget.value !== null) {
-            activePromptTarget.value = null;
-          }
-          return;
-        }
-        const next = normalizeTargetPayload(resolved.node, resolved.widget);
-        if (!next) {
-          if (activePromptTarget.value !== null) {
-            activePromptTarget.value = null;
-          }
-          return;
-        }
-        const current = activePromptTarget.value;
-        if (
-          current &&
-          current.nodeId === next.nodeId &&
-          current.graph === next.graph &&
-          current.widgetName === next.widgetName
-        ) {
-          current.nodeRef = resolved.node;
-          return;
-        }
-        activePromptTarget.value = next;
-      };
-
-      let selectionMonitorId = null;
-
-      const startSelectionMonitor = () => {
-        if (!comfyApp?.canvas) return;
-        if (selectionMonitorId != null) return;
-        updateActivePromptTarget();
-        selectionMonitorId = window.setInterval(updateActivePromptTarget, 400);
-      };
-
-      const stopSelectionMonitor = () => {
-        if (selectionMonitorId != null) {
-          window.clearInterval(selectionMonitorId);
-          selectionMonitorId = null;
-        }
-      };
-
-      const resolveNodeFromTarget = (target) => {
-        if (!target) return null;
-        const { nodeRef, nodeId, graph } = target;
-        const resolveFromGraph = (graphInstance) => {
-          if (!graphInstance?.getNodeById) return null;
-          try {
-            return graphInstance.getNodeById(nodeId) ?? null;
-          } catch (error) {
-            logError("resolveNodeFromTarget getNodeById error", error);
-            return null;
-          }
-        };
-
-        let node = resolveFromGraph(graph);
-        if (!node && nodeRef?.graph) {
-          node = resolveFromGraph(nodeRef.graph);
-        }
-        if (!node && comfyApp?.graph) {
-          node = resolveFromGraph(comfyApp.graph);
-        }
-        if (
-          !node &&
-          Array.isArray(comfyApp?.graph?.nodes)
-        ) {
-          node =
-            comfyApp.graph.nodes.find((candidate) => candidate?.id === nodeId) ??
-            null;
-        }
-        if (!node && nodeRef) {
-          node = nodeRef;
-        }
-        return node ?? null;
-      };
-
-      const applyPromptToWidget = (node, widget, promptText) => {
-        if (!node || !widget) return false;
-        const normalized =
-          typeof promptText === "string" ? promptText : String(promptText ?? "");
-        const previous =
-          typeof widget.value === "string"
-            ? widget.value
-            : widget.value ?? "";
-        if (previous === normalized) {
-          return false;
-        }
-
-        let handled = false;
-        if (typeof widget.setValue === "function") {
-          try {
-            widget.setValue(normalized, {
-              node,
-              canvas: comfyApp?.canvas ?? null,
-            });
-            handled = true;
-          } catch (error) {
-            logError("applyPromptToWidget.setValue error", error);
-          }
-        }
-
-        if (!handled) {
-          try {
-            widget.value = normalized;
-            handled = true;
-          } catch (error) {
-            logError("applyPromptToWidget.value assignment error", error);
-            return false;
-          }
-          if (typeof widget.callback === "function") {
-            try {
-              widget.callback(
-                widget.value,
-                comfyApp?.canvas ?? null,
-                node,
-                comfyApp?.canvas?.graph_mouse ?? null,
-                null
-              );
-            } catch (error) {
-              logError("applyPromptToWidget.callback error", error);
-            }
-          }
-          if (typeof node.onWidgetChanged === "function") {
-            try {
-              node.onWidgetChanged(
-                widget.name ?? "",
-                widget.value,
-                previous,
-                widget
-              );
-            } catch (error) {
-              logError("applyPromptToWidget.onWidgetChanged error", error);
-            }
-          }
-        }
-
-        if (Array.isArray(node.widgets_values)) {
-          const index = node.widgets?.indexOf?.(widget) ?? -1;
-          if (index !== -1) {
-            node.widgets_values[index] = widget.value;
-          }
-        }
-
-        node.setDirtyCanvas?.(true, true);
-        node.graph?.setDirtyCanvas?.(true, true);
-        if (node.graph) {
-          node.graph._version = (node.graph._version ?? 0) + 1;
-        }
-        return true;
-      };
-
-      const usePrompt = (entry) => {
-        if (!entry) return;
-        const target = activePromptTarget.value;
-        if (!target) {
-          copyPrompt(entry);
-          return;
-        }
-        const node = resolveNodeFromTarget(target);
-        if (!node) {
-          showToast(
-            "Active Prompt History Input is no longer available.",
-            "warn"
-          );
-          activePromptTarget.value = null;
-          return;
-        }
-        const widget =
-          node.widgets?.find((item) => item?.name === target.widgetName) ??
-          resolvePromptWidget(node);
-        if (!widget) {
-          showToast("Prompt widget not found on active node.", "warn");
-          return;
-        }
-        const updated = applyPromptToWidget(node, widget, entry.prompt ?? "");
-        target.nodeRef = node;
-        if (updated) {
-          const destination = target.nodeTitle ?? "Prompt History Input";
-          showToast(`Prompt sent to ${destination}.`, "success");
-        } else {
-          showToast("Prompt already matches selected input.", "info");
-        }
-      };
-
-      const showToast = (detail, severity = "info") => {
-        toastStore?.add({
-          severity,
-          summary: "Prompt History",
-          detail,
-          life: 2500,
-        });
-      };
-
-      const confirmAction = (message) => {
-        if (typeof window !== "undefined" && typeof window.confirm === "function") {
-          return window.confirm(message);
-        }
-        return true;
-      };
-
-      const refreshEntries = async () => {
-        isLoading.value = true;
-        errorMessage.value = "";
-        try {
-          const items = await historyApi.list(limit.value);
-          entries.value = items;
-          viewerBridge.close();
-        } catch (error) {
-          logError("refreshEntries error", error);
-          errorMessage.value =
-            error?.message ?? "Failed to load prompt history.";
-        } finally {
-          isLoading.value = false;
-        }
-      };
-
-      const copyPrompt = async (entry) => {
-        try {
-          await navigator.clipboard.writeText(entry.prompt ?? "");
-          showToast("Prompt copied to clipboard.");
-        } catch (error) {
-          logError("copyPrompt error", error);
-          showToast("Failed to copy prompt.", "warn");
-        }
-      };
-
-      const deleteEntry = async (entry) => {
-        if (!entry?.id) return;
-        const confirmed = confirmAction("Delete this prompt history entry?");
-        if (!confirmed) {
-          return;
-        }
-        try {
-          await historyApi.remove(entry.id);
-          entries.value = entries.value.filter((item) => item.id !== entry.id);
-          if (viewerBridge.isActive(entry.id)) {
-            viewerBridge.close();
-          }
-          showToast("History entry deleted.", "success");
-        } catch (error) {
-          logError("deleteEntry error", error);
-          showToast("Failed to delete history entry.", "error");
-        }
-      };
-
-      const clearAll = async () => {
-        const confirmed = confirmAction(
-          "Delete all prompt history entries? This cannot be undone."
-        );
-        if (!confirmed) {
-          return;
-        }
-        try {
-          await historyApi.clear();
-          entries.value = [];
-          viewerBridge.close();
-          showToast("Cleared all history.", "success");
-        } catch (error) {
-          logError("clearAll error", error);
-          showToast("Failed to clear history.", "error");
-        }
-      };
-
-      const openGallery = async (entry, startIndex = 0) => {
-        try {
-          const sources = buildImageSources(entry, api);
-          if (!sources.length) {
-            showToast("No images available for this prompt.", "warn");
-            return;
-          }
-          await nextTick();
-          await viewerBridge.open(entry.id ?? null, sources, startIndex);
-        } catch (error) {
-          logError("openGallery error", error);
-          viewerBridge.close();
-          showToast("Failed to open image gallery.", "warn");
-        }
-      };
-
-      const updateEventName = HISTORY_UPDATE_EVENT;
-      const handleHistoryUpdate = () => {
-        refreshEntries();
-      };
-
-      const updatePreviewSetting = (key, value) => {
-        if (!key) return;
-        previewSettingsStore?.update?.({ [key]: value });
-      };
-
-      const togglePreviewSettingsEnabled = (value) => {
-        previewSettingsStore?.update?.({ enabled: Boolean(value) });
-      };
-
-      const toggleSettingsCollapsed = () => {
-        settingsCollapsed.value = !settingsCollapsed.value;
-      };
-
-      onMounted(() => {
-        refreshEntries();
-        startSelectionMonitor();
-        if (api?.addEventListener) {
-          api.addEventListener(updateEventName, handleHistoryUpdate);
-        }
-        eventBus?.on?.(updateEventName, handleHistoryUpdate);
-        if (previewSettingsStore?.subscribe && !settingsUnsubscribe) {
-          settingsUnsubscribe = previewSettingsStore.subscribe((state) => {
-            previewSettings.value = { ...(state || {}) };
-          });
-          previewSettings.value = previewSettingsStore.getState();
-        }
-      });
-
-      onBeforeUnmount(() => {
-        stopSelectionMonitor();
-        if (api?.removeEventListener) {
-          api.removeEventListener(updateEventName, handleHistoryUpdate);
-        }
-        eventBus?.off?.(updateEventName, handleHistoryUpdate);
-        viewerBridge.dispose();
-        if (settingsUnsubscribe) {
-          settingsUnsubscribe();
-          settingsUnsubscribe = null;
-        }
-      });
-
-      return {
-        entries,
-        isLoading,
-        errorMessage,
-        hasEntries,
-        hasActivePromptTarget,
-        activePromptTarget,
-        refreshEntries,
-        copyPrompt,
-        usePrompt,
-        deleteEntry,
-        clearAll,
-        openGallery,
-        buildImageSources: (entry) => buildImageSources(entry, api),
-        previewSettings,
-        previewPositionOptions: PREVIEW_POSITIONS,
-        updatePreviewSetting,
-        togglePreviewSettingsEnabled,
-        settingsCollapsed,
-        toggleSettingsCollapsed,
-      };
-    },
-    render() {
-      const createText = (text) => h("span", text);
-      const hasPromptTarget = this.hasActivePromptTarget;
-      const settings = this.previewSettings || {};
-      const settingsEnabled = settings.enabled !== false;
-      const collapsed = !!this.settingsCollapsed;
-      const rangeField = ({
-        label,
-        key,
-        min,
-        max,
-        step = 1,
-        formatter = (value) => String(value),
-      }) =>
-        h(
-          "label",
-          {
-            class: [
-              "phg-settings-field",
-              !settingsEnabled ? "phg-settings-field--disabled" : null,
-            ].filter(Boolean),
-          },
-          [
-            h("span", { class: "phg-settings-label" }, label),
-            h("input", {
-              type: "range",
-              min,
-              max,
-              step,
-              value: settings[key] ?? min,
-              disabled: !settingsEnabled,
-              onInput: (event) => {
-                const next = Number(event?.target?.value ?? 0);
-                this.updatePreviewSetting(key, next);
-              },
-            }),
-            h(
-              "span",
-              { class: "phg-settings-value" },
-              formatter(Number(settings[key] ?? min))
-          ),
-        ]
-        );
-
-      const positionField = h(
-        "label",
-        {
-          class: [
-            "phg-settings-field",
-            !settingsEnabled ? "phg-settings-field--disabled" : null,
-          ].filter(Boolean),
-        },
-        [
-          h("span", { class: "phg-settings-label" }, "Corner"),
-          h(
-            "select",
-            {
-              value: settings.position || "bottom-left",
-              disabled: !settingsEnabled,
-              onChange: (event) => {
-                const next = event?.target?.value;
-                if (next) {
-                  this.updatePreviewSetting("position", next);
-                }
-              },
-            },
-            (this.previewPositionOptions || []).map((option) =>
-              h("option", { value: option.value }, option.label)
-            )
-          ),
-        ]
-      );
-
-      const enableSwitch = h("label", { class: "phg-switch" }, [
-        h("input", {
-          type: "checkbox",
-          checked: settingsEnabled,
-          onChange: (event) =>
-            this.togglePreviewSettingsEnabled(event?.target?.checked ?? false),
-        }),
-      ]);
-
-      const settingsPanel = h(
-        "section",
-        {
-          class: [
-            "phg-settings",
-            collapsed ? "phg-settings--collapsed" : null,
-          ].filter(Boolean),
-        },
-        [
-          h("header", { class: "phg-settings-header" }, [
-            h("div", { class: "phg-settings-title" }, "Preview Settings"),
-            h("div", { class: "phg-settings-actions" }, [
-              h("div", { class: "phg-switch-label" }, [
-                "Enabled",
-                enableSwitch,
-              ]),
-              h(
-                "button",
-                {
-                  type: "button",
-                  class: "phg-settings-toggle",
-                  onClick: () => this.toggleSettingsCollapsed(),
-                },
-                collapsed ? "Expand" : "Collapse"
-              ),
-            ]),
-          ]),
-          !collapsed
-            ? h("div", { class: "phg-settings-content" }, [
-                h("div", { class: "phg-settings-grid" }, [
-                  rangeField({
-                    label: "Thumbnail Size",
-                    key: "imageSize",
-                    min: 72,
-                    max: 220,
-                    step: 4,
-                    formatter: (value) => `${Math.round(value)} px`,
-                  }),
-                  rangeField({
-                    label: "Display Duration",
-                    key: "displayDuration",
-                    min: 1500,
-                    max: 15000,
-                    step: 500,
-                    formatter: (value) => `${(value / 1000).toFixed(1)} s`,
-                  }),
-                  positionField,
-                ]),
-                h(
-                  "p",
-                  { class: "phg-settings-hint" },
-                  settingsEnabled
-                    ? "Previews close automatically based on the duration above."
-                    : "Preview Settings are disabled; defaults will be used."
-                ),
-              ])
-            : null,
-        ]
-      );
-      const createIconButton = ({
-        icon,
-        label,
-        onClick,
-        disabled = false,
-        severity = null,
-        badge = null,
-      }) => {
-        const classes = [
-          "p-button",
-          "p-button-rounded",
-          "p-button-text",
-          "p-button-icon-only",
-          "p-button-sm",
-          "phg-action-button",
-        ];
-        if (severity === "danger") {
-          classes.push("p-button-danger");
-        }
-
-        return h(
-          "button",
-          {
-            class: classes.join(" "),
-            type: "button",
-            disabled,
-            onClick,
-            title: label,
-            "aria-label": label,
-          },
-          [
-            h("i", { class: `pi ${icon}` }),
-            badge != null
-              ? h(
-                  "span",
-                  {
-                    class: "p-badge phg-action-badge",
-                  },
-                  String(badge)
-                )
-              : null,
-          ].filter(Boolean)
-        );
-      };
-
-      const status = this.errorMessage
-        ? h("div", { class: "phg-message phg-message--error" }, [
-            createText(this.errorMessage),
-          ])
-        : null;
-
-      const empty = !this.isLoading && !this.hasEntries
-        ? h(
-            "div",
-            { class: "phg-message phg-message--empty" },
-            "No prompt history yet. Run a workflow to populate this list."
-          )
-        : null;
-
-      const entriesList = h(
-        "div",
-        { class: "phg-entries" },
-        this.entries.map((entry) => {
-          const galleryItems = this.buildImageSources(entry);
-          const hasGallery = galleryItems.length > 0;
-
-          const tags =
-            Array.isArray(entry.tags) && entry.tags.length > 0
-              ? h(
-                  "div",
-                  { class: "phg-entry-tags" },
-                  entry.tags.map((tag) =>
-                    h("span", { class: "phg-tag", key: tag }, tag)
-                  )
-                )
-              : null;
-
-          const metadataNotes = entry?.metadata?.notes
-            ? h(
-                "div",
-                { class: "phg-entry-meta" },
-                String(entry.metadata.notes)
-              )
-            : null;
-
-          const lastUsed =
-            entry?.last_used_at ?? entry?.created_at ?? "";
-          const displayDate = lastUsed
-            ? new Date(lastUsed).toLocaleString()
-            : "Unknown";
-
-          return h(
-            "article",
-            { class: "phg-entry", key: entry.id },
-            [
-              h("header", { class: "phg-entry-header" }, [
-                h(
-                  "span",
-                  {
-                    class: "phg-entry-date",
-                    title:
-                      entry.created_at && entry.created_at !== lastUsed
-                        ? `Created: ${new Date(entry.created_at).toLocaleString()}`
-                        : undefined,
-                  },
-                  displayDate
-                ),
-                h("div", { class: "phg-entry-actions" }, [
-                  createIconButton({
-                    icon: hasPromptTarget
-                      ? "pi-arrow-circle-right"
-                      : "pi-copy",
-                    label: hasPromptTarget ? "Use prompt" : "Copy prompt",
-                    onClick: () =>
-                      hasPromptTarget
-                        ? this.usePrompt(entry)
-                        : this.copyPrompt(entry),
-                  }),
-                  createIconButton({
-                    icon: "pi-image",
-                    label: hasGallery
-                      ? `Open gallery (${galleryItems.length} images)`
-                      : "No generated images were captured",
-                    disabled: !hasGallery,
-                    onClick: () => this.openGallery(entry, 0),
-                    badge: hasGallery ? galleryItems.length : null,
-                  }),
-                  createIconButton({
-                    icon: "pi-trash",
-                    label: "Delete entry",
-                    severity: "danger",
-                    onClick: () => this.deleteEntry(entry),
-                  }),
-                ]),
-              ]),
-              h("pre", { class: "phg-entry-prompt" }, entry.prompt ?? ""),
-              tags,
-              metadataNotes,
-            ].filter(Boolean)
-          );
-        })
-      );
-
-      return h("div", { class: "phg-container" }, [
-        settingsPanel,
-        status,
-        this.isLoading
-          ? h("div", { class: "phg-message" }, "Loading history…")
-          : null,
-        empty,
-        entriesList,
-      ]);
-    },
-  });
+  api?.addEventListener?.(HISTORY_UPDATE_EVENT, handler);
+  eventBus?.on?.(HISTORY_UPDATE_EVENT, handler);
+  listenersAttached = true;
 }
 
-async function registerHistoryTab() {
-  if (isRegistered) return;
-  ensureStylesheet();
-
-  const module = await getMainBundleModule();
-  const vue = await getVueModule();
-  const useWorkspaceStore = resolveWorkspaceStore(module);
-  const useSidebarTabStore = resolveSidebarTabStore(module);
-
-  if (!useWorkspaceStore && !useSidebarTabStore) {
-    throw new Error("Workspace/Sidebar stores were not found");
-  }
-
-  const workspaceStore = useWorkspaceStore ? useWorkspaceStore() : null;
-  const sidebarTabStore = useSidebarTabStore
-    ? useSidebarTabStore()
-    : workspaceStore?.sidebarTab?.value ?? null;
-
-  const registerTab =
-    workspaceStore?.registerSidebarTab ??
-    sidebarTabStore?.registerSidebarTab ??
-    null;
-  if (!registerTab) {
-    throw new Error("registerSidebarTab was not found");
-  }
-
-  const getTabs =
-    workspaceStore?.getSidebarTabs ??
-    sidebarTabStore?.getSidebarTabs ??
-    (() => sidebarTabStore?.sidebarTabs ?? []);
-
-  const existing = getTabs()?.find((tab) => tab.id === TAB_ID);
+function attachHistoryButton(node) {
+  if (!node || typeof node.addWidget !== "function") return;
+  const existing = Array.isArray(node.widgets)
+    ? node.widgets.find(
+        (widget) =>
+          widget?.[HISTORY_WIDGET_FLAG] === true ||
+          widget?.name === "phg_history" ||
+          widget?.name === "History" ||
+          widget?.name === HISTORY_WIDGET_LABEL
+      )
+    : null;
+  const dialog = ensureDialog();
+  const handler = () => dialog.openWithNode(node);
   if (existing) {
-    isRegistered = true;
-    logInfo("History tab already registered");
+    existing.callback = handler;
+    existing[HISTORY_WIDGET_FLAG] = true;
+    existing.name = HISTORY_WIDGET_LABEL;
+    return;
+  }
+  const widget = node.addWidget("button", HISTORY_WIDGET_LABEL, null, handler, {
+    serialize: false,
+  });
+  if (widget) {
+    widget[HISTORY_WIDGET_FLAG] = true;
+    widget.name = HISTORY_WIDGET_LABEL;
+  }
+}
+
+function registerExtension() {
+  logInfo("loading");
+  const comfyApp = resolveComfyApp();
+  const comfyApi = resolveComfyApi();
+
+  if (comfyApp?.registerExtension) {
+    comfyApp.registerExtension({
+      name: EXTENSION_NAME,
+      setup() {
+        ensureDialog();
+        attachUpdateListeners(comfyApi, comfyApp?.eventBus ?? null);
+      },
+      beforeRegisterNodeDef(nodeType, nodeData) {
+        if (nodeData?.name !== "PromptHistoryInput") return;
+        const onCreated = nodeType.prototype.onNodeCreated;
+        nodeType.prototype.onNodeCreated = function (...args) {
+          const result = onCreated?.apply(this, args);
+          attachHistoryButton(this);
+          return result;
+        };
+      },
+    });
     return;
   }
 
-  const useToastStore = resolveToastStore(module);
-  const toastStore = useToastStore
-    ? useToastStore()
-    : workspaceStore?.toast?.value ?? null;
-
-  const comfyApp = window.comfyAPI?.app?.app ?? null;
-  const comfyApi = comfyApp?.api ?? window.comfyAPI?.api?.api ?? null;
-  const eventBus = comfyApp?.eventBus ?? null;
-  const historyApi = createHistoryApi(comfyApi);
-
-  const vueHelpers = {
-    defineComponent: vue.defineComponent,
-    ref: vue.ref,
-    computed: vue.computed,
-    nextTick:
-      typeof vue.nextTick === "function"
-        ? vue.nextTick
-        : (callback) => {
-            const promise = Promise.resolve();
-            return callback ? promise.then(callback) : promise;
-          },
-    onMounted: vue.onMounted,
-    onBeforeUnmount: vue.onBeforeUnmount,
-    h: vue.h,
-  };
-
-  const assetLoader = createAssetLoader("data-phg-asset");
-  if (!previewListenersAttached) {
-    const previewNotifier = createPreviewNotifier({
-      api: comfyApi,
-      historyApi,
-      logger: console,
-    });
-
-    if (previewNotifier) {
-      const previewHandler = (event) => {
-        try {
-          const result =
-            previewNotifier.handleHistoryEvent?.(event) ??
-            previewNotifier.notifyEntryIds?.(extractEntryIds(event));
-          if (result && typeof result.then === "function") {
-            result.catch((error) => {
-              logError("Preview notification failed", error);
-            });
-          }
-        } catch (error) {
-          logError("Preview notification failed", error);
-        }
-      };
-
-      if (comfyApi?.addEventListener) {
-        comfyApi.addEventListener(HISTORY_UPDATE_EVENT, previewHandler);
+  // Fallback for older frontends without registerExtension hook.
+  ensureDialog();
+  attachUpdateListeners(comfyApi, comfyApp?.eventBus ?? null);
+  const originalRegisterNode = window?.LiteGraph?.registerNodeType;
+  if (originalRegisterNode) {
+    window.LiteGraph.registerNodeType = function (type, nodeType) {
+      originalRegisterNode.call(window.LiteGraph, type, nodeType);
+      if (nodeType?.title === "Prompt History Input" || type?.endsWith("PromptHistoryInput")) {
+        const onCreated = nodeType.prototype.onNodeCreated;
+        nodeType.prototype.onNodeCreated = function (...args) {
+          const res = onCreated?.apply(this, args);
+          attachHistoryButton(this);
+          return res;
+        };
       }
-      eventBus?.on?.(HISTORY_UPDATE_EVENT, previewHandler);
-      previewListenersAttached = true;
-    }
-  }
-
-  const component = createHistoryComponent({
-    api: comfyApi,
-    toastStore,
-    vueHelpers,
-    eventBus,
-    assetLoader,
-    comfyApp,
-    historyApi,
-  });
-
-  registerTab({
-    id: TAB_ID,
-    icon: "pi pi-clock",
-    title: "Prompt History",
-    tooltip: "Prompt History",
-    label: "Prompt History",
-    type: "vue",
-    component: vue.markRaw ? vue.markRaw(component) : component,
-  });
-
-  isRegistered = true;
-  logInfo("History tab registered");
-}
-
-const MAX_ATTEMPTS = 20;
-const RETRY_DELAY = 500;
-
-async function attemptRegistration(attempt = 0) {
-  if (isRegistered) return;
-
-  try {
-    await registerHistoryTab();
-  } catch (error) {
-    if (attempt >= MAX_ATTEMPTS) {
-      logError("History tab registration failed", error);
-      return;
-    }
-    setTimeout(() => attemptRegistration(attempt + 1), RETRY_DELAY);
+    };
   }
 }
 
-logInfo(`${EXTENSION_NAME} loading`);
-const comfyAppInstance = window.comfyAPI?.app?.app;
-if (comfyAppInstance?.registerExtension) {
-  let setupInvoked = false;
-  const runSetup = () => {
-    if (setupInvoked) return;
-    setupInvoked = true;
-    logInfo("setup hook called");
-    attemptRegistration();
-  };
-
-  comfyAppInstance.registerExtension({
-    name: EXTENSION_NAME,
-    setup: runSetup,
-  });
-
-  // Newer ComfyUI frontends (v1.28.8+/ComfyUI 0.3.75+) stopped invoking
-  // extension.setup automatically. Run it once here as a fallback so the
-  // sidebar tab still registers.
-  runSetup();
-} else {
-  attemptRegistration();
-}
+registerExtension();
