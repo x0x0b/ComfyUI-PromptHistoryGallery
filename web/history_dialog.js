@@ -511,10 +511,26 @@ class HistoryDialog {
     return button;
   }
 
-  _createChip(label, variant = "") {
+  _createChip(label, variant = "", onClick = null) {
     const chip = document.createElement("span");
     chip.className = "phg-chip" + (variant ? ` phg-chip--${variant}` : "");
     chip.textContent = label;
+    if (typeof onClick === "function") {
+      chip.classList.add("phg-chip--clickable");
+      chip.setAttribute("role", "button");
+      chip.tabIndex = 0;
+      const handler = (event) => {
+        event.stopPropagation();
+        onClick();
+      };
+      chip.addEventListener("click", handler);
+      chip.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          handler(event);
+        }
+      });
+    }
     return chip;
   }
 
@@ -530,16 +546,6 @@ class HistoryDialog {
         () => this._handleUse(entry)
       ),
       this._createButton("Copy", "Copy prompt", () => this._copyPrompt(entry), "ghost"),
-      (() => {
-        const button = this._createButton(
-          "Gallery",
-          hasImages ? "Open generated images" : TEXT.noImages,
-          () => this._openGallery(entry, sources.length - 1),
-          "ghost"
-        );
-        button.disabled = !hasImages;
-        return button;
-      })(),
       this._createButton("Delete", "Delete entry", () => this._deleteEntry(entry), "danger")
     );
 
@@ -653,12 +659,13 @@ class HistoryDialog {
     const header = createEl("div", "phg-entry-card__header");
     const stamp = createEl("div", "phg-entry-card__stamp", formatTimestamp(entry?.last_used_at ?? entry?.created_at));
     const badges = createEl("div", "phg-entry-card__badges");
-    badges.append(
-      this._createChip(
-        hasImages ? `${sources.length} image${sources.length === 1 ? "" : "s"}` : "No images",
-        hasImages ? "accent" : "muted"
-      )
+    const imagesChip = this._createChip(
+      hasImages ? `${sources.length} image${sources.length === 1 ? "" : "s"}` : "No images",
+      hasImages ? "accent" : "muted",
+      hasImages ? () => this._openGallery(entry, sources.length - 1) : null
     );
+    imagesChip.title = hasImages ? "Open generated images" : TEXT.noImages;
+    badges.append(imagesChip);
     header.append(stamp, badges, this._buildActions(entry, sources));
 
     const body = createEl("div", "phg-entry-card__body");
@@ -769,6 +776,19 @@ function attachUpdateListeners(api, eventBus) {
     api,
     historyApi: dialog.historyApi,
     logger: console,
+    openGallery: (entry, sources, startIndex = 0) => {
+      if (!dialog?.viewer || !Array.isArray(sources) || sources.length === 0) {
+        return false;
+      }
+      const safeIndex = Math.max(0, Math.min(startIndex, sources.length - 1));
+      try {
+        const result = dialog.viewer.open(entry?.id ?? null, sources, safeIndex);
+        return result ?? true;
+      } catch (error) {
+        logError("preview openGallery error", error);
+        return false;
+      }
+    },
   });
 
   const handler = (event) => {

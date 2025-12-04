@@ -240,6 +240,7 @@ export function createPreviewNotifier({
   displayMs = DEFAULT_DURATION_MS,
   maxVisible = DEFAULT_MAX_VISIBLE,
   maxImages = DEFAULT_MAX_IMAGES,
+  openGallery = null,
 } = {}) {
   if (typeof window === "undefined") {
     return null;
@@ -377,7 +378,7 @@ export function createPreviewNotifier({
     return sources;
   };
 
-  const createPreviewCard = (entry, images) => {
+  const createPreviewCard = (entry, previewImages, allImages) => {
     if (previewsDisabled()) {
       return null;
     }
@@ -406,7 +407,7 @@ export function createPreviewNotifier({
     grid.className = "phg-preview-grid";
     const thumbSize = applyCardStyles(card, grid, runtimeSettings);
 
-    images.forEach((source) => {
+    previewImages.forEach((source, index) => {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "phg-preview-image";
@@ -427,7 +428,21 @@ export function createPreviewNotifier({
       });
       button.addEventListener("click", (event) => {
         event.preventDefault();
-        window.open(source.url, "_blank", "noopener,noreferrer");
+        const gallerySources =
+          Array.isArray(allImages) && allImages.length ? allImages : previewImages;
+        const matchedIndex = gallerySources.findIndex(
+          (item) => item?.url === source.url || item?.thumb === source.thumb
+        );
+        const startIndex = matchedIndex >= 0 ? matchedIndex : index;
+        const result =
+          typeof openGallery === "function"
+            ? openGallery(entry, gallerySources, startIndex)
+            : null;
+        if (result === false) {
+          window.open(source.url, "_blank", "noopener,noreferrer");
+        } else if (result && typeof result.then === "function") {
+          result.catch((error) => logError("preview openGallery error", error));
+        }
       });
       button.style.minHeight = `${Math.round(thumbSize)}px`;
       button.appendChild(img);
@@ -452,11 +467,11 @@ export function createPreviewNotifier({
         return;
       }
       const sources = buildImageSources(entry, api);
-      const selected = limitSources(sources);
-      if (!selected.length) {
+      const previewSources = limitSources(sources);
+      if (!previewSources.length) {
         return;
       }
-      createPreviewCard(entry, selected);
+      createPreviewCard(entry, previewSources, sources);
     });
   };
 
@@ -476,34 +491,7 @@ export function createPreviewNotifier({
     return { show: false, entryId: fallback };
   };
 
-  const tryShowGeneratedFiles = (entryIds, filesPayload) => {
-    if (previewsDisabled()) {
-      return false;
-    }
-    if (!Array.isArray(filesPayload) || !filesPayload.length) {
-      return false;
-    }
-    const pseudoEntry = {
-      id: null,
-      files: filesPayload,
-    };
-    const sources = buildImageSources(pseudoEntry, api);
-    const selected = limitSources(sources);
-    if (!selected.length) {
-      return false;
-    }
-    const claim = claimEntrySlot(entryIds);
-    if (!claim.show) {
-      return false;
-    }
-    if (claim.entryId) {
-      pseudoEntry.id = claim.entryId;
-    }
-    createPreviewCard(pseudoEntry, selected);
-    return true;
-  };
-
-  const fetchEntriesByIds = async (entryIds) => {
+  async function fetchEntriesByIds(entryIds) {
     const unique = Array.from(
       new Set(entryIds.map(sanitizeEntryId).filter(Boolean))
     );
@@ -521,6 +509,92 @@ export function createPreviewNotifier({
       logError("preview entry fetch failed", error);
       return [];
     }
+  }
+
+  const tryShowGeneratedFiles = async (entryIds, filesPayload) => {
+    if (previewsDisabled()) {
+      return false;
+    }
+    if (!Array.isArray(filesPayload) || !filesPayload.length) {
+      return false;
+    }
+
+    // Preview thumbnails come from the freshly generated files,
+    // but we prefer the full gallery from the matched history entry.
+    const previewSources = limitSources(
+      buildImageSources(
+        {
+          files: filesPayload,
+        },
+        api
+      )
+    );
+
+    const claim = claimEntrySlot(entryIds);
+    if (!claim.show) {
+      return false;
+    }
+
+    let entry = null;
+    let gallerySources = [];
+
+    if (claim.entryId) {
+      const fetched = await fetchEntriesByIds([claim.entryId]);
+      entry = fetched?.[0] ?? null;
+      if (entry) {
+        gallerySources = buildImageSources(entry, api);
+      }
+    }
+
+    if (!entry) {
+      entry = { id: claim.entryId ?? null };
+    }
+
+    if (!entry.id) {
+      try {
+        const recent = await resolvedHistoryApi.list(50);
+        const targetNames = new Set(
+          filesPayload
+            .map(normalizeGeneratedFile)
+            .map((item) => item?.filename ?? null)
+            .filter(Boolean)
+        );
+        const match = recent.find((item) =>
+          Array.isArray(item?.files) &&
+          item.files.some((file) => {
+            if (typeof file === "string") {
+              return targetNames.has(file);
+            }
+            if (file && typeof file === "object") {
+              const name = file.filename ?? file.name ?? null;
+              return name ? targetNames.has(String(name)) : false;
+            }
+            return false;
+          })
+        );
+        if (match) {
+          entry = match;
+          gallerySources = buildImageSources(entry, api);
+        }
+      } catch (error) {
+        logError("preview match recent entry failed", error);
+      }
+    }
+
+    if (!gallerySources.length && entry?.files) {
+      gallerySources = buildImageSources(entry, api);
+    }
+
+    const previews = previewSources.length
+      ? previewSources
+      : limitSources(gallerySources);
+    if (!previews.length) {
+      return false;
+    }
+
+    const gallery = gallerySources.length ? gallerySources : previews;
+    createPreviewCard(entry, previews, gallery);
+    return true;
   };
 
   return {
@@ -531,7 +605,11 @@ export function createPreviewNotifier({
       }
       const entryIds = extractEntryIds(event);
       const generatedFiles = extractGeneratedFiles(event);
-      if (tryShowGeneratedFiles(entryIds, generatedFiles)) {
+      const handledGenerated = await tryShowGeneratedFiles(
+        entryIds,
+        generatedFiles
+      );
+      if (handledGenerated) {
         return;
       }
       if (entryIds.length > 0) {
