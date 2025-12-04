@@ -2,6 +2,7 @@ import { createHistoryApi } from "./lib/historyApi.js";
 import { buildImageSources } from "./lib/imageSources.js";
 import { createViewerBridge } from "./lib/viewerBridge.js";
 import { createPreviewNotifier, extractEntryIds } from "./lib/previewNotifier.js";
+import { getPreviewSettingsStore, DEFAULT_SETTINGS } from "./lib/previewSettings.js";
 
 export {};
 
@@ -28,7 +29,17 @@ const TEXT = {
   deleteConfirm: "Delete this prompt history entry?",
   deleteSuccess: "History entry deleted.",
   deleteError: "Failed to delete entry.",
+  settingsTitle: "Preview Popup Settings",
+  settingsHint: "Controls the small pop-up shown after images are generated.",
+  settingsToggle: "Show pop-up previews",
+  settingsDuration: "Display time",
+  settingsReset: "Reset to defaults",
+  settingsClose: "Close settings",
 };
+
+const PREVIEW_MIN_MS = 1000;
+const PREVIEW_MAX_MS = 15000;
+const PREVIEW_STEP_MS = 250;
 
 const logInfo = (...messages) => console.info(LOG_PREFIX, ...messages);
 const logError = (...messages) => console.error(LOG_PREFIX, ...messages);
@@ -42,6 +53,8 @@ const createEl = (tag, className = "", text = null) => {
 
 const safeText = (value, fallback = "") =>
   value === null || value === undefined ? fallback : String(value);
+
+const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
 function ensureStylesheet() {
   const attr = "data-phg-style";
@@ -209,6 +222,13 @@ class HistoryDialog {
       cssUrl: new URL("./vendor/viewerjs/viewer.min.css", import.meta.url).href,
       scriptUrl: new URL("./vendor/viewerjs/viewer.min.js", import.meta.url).href,
     });
+    this.settingsStore = getPreviewSettingsStore();
+    this.settingsState = this.settingsStore?.getState?.() ?? DEFAULT_SETTINGS;
+    this.unsubscribeSettings =
+      this.settingsStore?.subscribe?.((next) => {
+        this.settingsState = next ?? this.settingsState;
+        this._syncSettingsUI();
+      }) ?? null;
 
     this.state = {
       isOpen: false,
@@ -216,11 +236,13 @@ class HistoryDialog {
       error: "",
       entries: [],
       target: null,
+      settingsOpen: false,
     };
 
     this.messageTimeout = null;
     this._buildLayout();
     this._updateTargetLabel();
+    this._syncSettingsUI();
   }
 
   openWithNode(node) {
@@ -243,6 +265,7 @@ class HistoryDialog {
     if (!this.state.isOpen) return;
     this.state.isOpen = false;
     this.backdrop.classList.add("phg-hidden");
+    this._toggleSettings(false);
     this.viewer.close();
   }
 
@@ -274,6 +297,161 @@ class HistoryDialog {
     }
   }
 
+  _toggleSettings(forceValue) {
+    const next =
+      typeof forceValue === "boolean" ? forceValue : !this.state.settingsOpen;
+    this.state.settingsOpen = next;
+    if (this.settingsPanel) {
+      this.settingsPanel.classList.toggle("phg-hidden", !next);
+    }
+    if (this.settingsBtn) {
+      this.settingsBtn.textContent = next ? TEXT.settingsClose : "Settings";
+      this.settingsBtn.dataset.active = next ? "true" : "false";
+    }
+  }
+
+  _formatDuration(ms) {
+    const safeValue = clamp(
+      Number(ms) || DEFAULT_SETTINGS.displayDuration,
+      PREVIEW_MIN_MS,
+      PREVIEW_MAX_MS
+    );
+    const seconds = safeValue / 1000;
+    const precision = seconds >= 10 ? 0 : 1;
+    return `${seconds.toFixed(precision)}s`;
+  }
+
+  _syncSettingsUI() {
+    const state =
+      this.settingsStore?.getState?.() ??
+      this.settingsState ??
+      DEFAULT_SETTINGS;
+    this.settingsState = state;
+    const enabled = state.enabled !== false;
+
+    if (this.previewToggleInput) {
+      this.previewToggleInput.checked = enabled;
+    }
+
+    if (this.durationInput) {
+      const duration = clamp(
+        Number(state.displayDuration ?? DEFAULT_SETTINGS.displayDuration),
+        PREVIEW_MIN_MS,
+        PREVIEW_MAX_MS
+      );
+      this.durationInput.value = String(duration);
+      if (this.durationValue) {
+        this.durationValue.textContent = `${this._formatDuration(
+          duration
+        )} (${Math.round(duration)} ms)`;
+      }
+      this.durationInput.disabled = !enabled;
+      if (this.durationField) {
+        this.durationField.classList.toggle(
+          "phg-settings-field--disabled",
+          !enabled
+        );
+      }
+    }
+  }
+
+  _applySettingsPatch(patch) {
+    if (!this.settingsStore?.update) return;
+    this.settingsStore.update(patch);
+    this.settingsState = this.settingsStore.getState?.() ?? this.settingsState;
+    this._syncSettingsUI();
+  }
+
+  _resetSettings() {
+    if (!this.settingsStore?.reset) return;
+    this.settingsStore.reset();
+    this.settingsState = this.settingsStore.getState?.() ?? DEFAULT_SETTINGS;
+    this._syncSettingsUI();
+  }
+
+  _buildSettingsPanel() {
+    const panel = createEl("section", "phg-settings phg-hidden");
+    panel.setAttribute("aria-label", TEXT.settingsTitle);
+
+    const header = createEl("div", "phg-settings-header");
+    const title = createEl("div", "phg-settings-title", TEXT.settingsTitle);
+    const actions = createEl("div", "phg-settings-actions");
+    const resetBtn = this._createButton(
+      TEXT.settingsReset,
+      "Restore preview defaults",
+      () => this._resetSettings(),
+      "ghost"
+    );
+    const closeBtn = this._createButton(
+      TEXT.settingsClose,
+      "Hide preview settings",
+      () => this._toggleSettings(false),
+      "ghost"
+    );
+    actions.append(resetBtn, closeBtn);
+    header.append(title, actions);
+
+    const grid = createEl("div", "phg-settings-grid");
+    grid.append(this._buildPreviewToggleField(), this._buildDurationField());
+
+    const hint = createEl("p", "phg-settings-hint", TEXT.settingsHint);
+
+    panel.append(header, grid, hint);
+    return panel;
+  }
+
+  _buildPreviewToggleField() {
+    const field = createEl("div", "phg-settings-field");
+    const label = createEl("div", "phg-settings-label", TEXT.settingsToggle);
+    const switchLabel = createEl("label", "phg-switch");
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = this.settingsState?.enabled !== false;
+    input.addEventListener("change", () => {
+      const enabled = input.checked;
+      this._applySettingsPatch({ enabled });
+    });
+    const switchText = createEl("span", "phg-switch-label", TEXT.settingsToggle);
+    switchLabel.append(input, switchText);
+    field.append(label, switchLabel);
+    this.previewToggleInput = input;
+    return field;
+  }
+
+  _buildDurationField() {
+    const field = createEl("div", "phg-settings-field");
+    const label = createEl("div", "phg-settings-label", TEXT.settingsDuration);
+    const range = document.createElement("input");
+    range.type = "range";
+    range.min = String(PREVIEW_MIN_MS);
+    range.max = String(PREVIEW_MAX_MS);
+    range.step = String(PREVIEW_STEP_MS);
+    const initialDuration = clamp(
+      Number(this.settingsState?.displayDuration ?? DEFAULT_SETTINGS.displayDuration),
+      PREVIEW_MIN_MS,
+      PREVIEW_MAX_MS
+    );
+    range.value = String(initialDuration);
+    const value = createEl(
+      "div",
+      "phg-settings-value",
+      `${this._formatDuration(initialDuration)} (${Math.round(initialDuration)} ms)`
+    );
+    range.addEventListener("input", () => {
+      const next = clamp(Number(range.value), PREVIEW_MIN_MS, PREVIEW_MAX_MS);
+      value.textContent = `${this._formatDuration(next)} (${Math.round(next)} ms)`;
+    });
+    range.addEventListener("change", () => {
+      const next = clamp(Number(range.value), PREVIEW_MIN_MS, PREVIEW_MAX_MS);
+      this._applySettingsPatch({ displayDuration: next });
+    });
+    field.append(label, range, value);
+    this.durationInput = range;
+    this.durationValue = value;
+    this.durationField = field;
+    return field;
+  }
+
   _buildLayout() {
     this.backdrop = createEl("div", "phg-dialog-backdrop phg-hidden");
     this.backdrop.dataset.phg = "history";
@@ -289,16 +467,19 @@ class HistoryDialog {
 
     const actions = createEl("div", "phg-dialog__actions");
     this.refreshBtn = this._createButton("Refresh", "Reload history", () => this.refresh());
+    this.settingsBtn = this._createButton("Settings", "Preview popup settings", () => this._toggleSettings());
     this.closeBtn = this._createButton("Close", "Close history", () => this.close(), "ghost");
-    actions.append(this.refreshBtn, this.closeBtn);
+    actions.append(this.refreshBtn, this.settingsBtn, this.closeBtn);
 
     header.append(titleBlock, actions);
 
     this.statusEl = createEl("div", "phg-dialog__status");
     this.listEl = createEl("div", "phg-history-list");
 
+    this.settingsPanel = this._buildSettingsPanel();
+
     const body = createEl("div", "phg-dialog__body");
-    body.append(this.statusEl, this.listEl);
+    body.append(this.settingsPanel, this.statusEl, this.listEl);
 
     this.dialog.append(header, body);
     this.backdrop.appendChild(this.dialog);
