@@ -288,7 +288,7 @@
 
 .viewer-container .viewer-navbar .viewer-list > li {
   height: 100%;
-  width: 6vh;
+  width: clamp(64px, 7vh, 96px);
 }
 
 .viewer-container .viewer-canvas {
