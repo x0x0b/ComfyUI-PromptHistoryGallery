@@ -276,6 +276,11 @@
   opacity: 0.8;
 }
 
+/* Ensure the Viewer.js lightbox sits above the Prompt History dialog */
+.viewer-container {
+  z-index: 2147483700 !important;
+}
+
 /* Enlarge Viewer.js thumbnail strip for better visibility */
 .viewer-container .viewer-navbar .viewer-list {
   height: 8vh;
@@ -284,6 +289,10 @@
 .viewer-container .viewer-navbar .viewer-list > li {
   height: 100%;
   width: 6vh;
+}
+
+.viewer-container .viewer-canvas {
+  backdrop-filter: blur(2px);
 }
 
 .phg-preview-host {
