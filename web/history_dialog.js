@@ -776,6 +776,19 @@ function attachUpdateListeners(api, eventBus) {
     api,
     historyApi: dialog.historyApi,
     logger: console,
+    openGallery: (entry, sources, startIndex = 0) => {
+      if (!dialog?.viewer || !Array.isArray(sources) || sources.length === 0) {
+        return false;
+      }
+      const safeIndex = Math.max(0, Math.min(startIndex, sources.length - 1));
+      try {
+        const result = dialog.viewer.open(entry?.id ?? null, sources, safeIndex);
+        return result ?? true;
+      } catch (error) {
+        logError("preview openGallery error", error);
+        return false;
+      }
+    },
   });
 
   const handler = (event) => {
