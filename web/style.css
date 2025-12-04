@@ -408,7 +408,7 @@
   background: radial-gradient(circle at 20% 20%, rgba(56, 189, 248, 0.08), transparent 35%),
     radial-gradient(circle at 80% 10%, rgba(94, 234, 212, 0.08), transparent 35%),
     rgba(6, 8, 18, 0.8);
-  backdrop-filter: blur(4px);
+  backdrop-filter: blur(2px);
   z-index: 2147483650;
 }
 
