@@ -1,6 +1,10 @@
 import { createHistoryApi } from "./historyApi.js";
 import { buildImageSources } from "./imageSources.js";
-import { getPreviewSettingsStore } from "./previewSettings.js";
+import {
+  getPreviewSettingsStore,
+  DEFAULT_SETTINGS,
+  clampPercent,
+} from "./previewSettings.js";
 
 const HOST_ATTR = "data-phg-preview-root";
 const DEFAULT_DURATION_MS = 6000;
@@ -8,6 +12,7 @@ const DEFAULT_MAX_VISIBLE = 3;
 const DEFAULT_MAX_IMAGES = Number.POSITIVE_INFINITY;
 const DUPLICATE_WINDOW_MS = 800;
 const HOST_MARGIN = "1.25rem";
+const HOST_MARGIN_PX = 20;
 const MIN_IMAGE_SIZE = 72;
 const MAX_IMAGE_SIZE = 220;
 const DEFAULT_IMAGE_SIZE = 110;
@@ -99,6 +104,18 @@ function computeRuntimeSettings(settings = {}, fallbackDuration = DEFAULT_DURATI
       MIN_IMAGE_SIZE,
       MAX_IMAGE_SIZE
     ),
+    landscapeViewportPercent: clampPercent(
+      Number(
+        source.landscapeViewportPercent ?? DEFAULT_SETTINGS.landscapeViewportPercent
+      ),
+      DEFAULT_SETTINGS.landscapeViewportPercent
+    ),
+    portraitViewportPercent: clampPercent(
+      Number(
+        source.portraitViewportPercent ?? DEFAULT_SETTINGS.portraitViewportPercent
+      ),
+      DEFAULT_SETTINGS.portraitViewportPercent
+    ),
     position:
       typeof source.position === "string"
         ? source.position
@@ -138,13 +155,28 @@ function applyCardStyles(card, grid, runtimeSettings) {
     MAX_IMAGE_SIZE
   );
   if (grid) {
-    grid.style.gridTemplateColumns = `repeat(auto-fit, minmax(${thumbSize}px, 1fr))`;
+    grid.style.display = "flex";
+    grid.style.flexWrap = "wrap";
+    grid.style.gap = "0.4rem";
+    grid.style.alignItems = "flex-start";
+    grid.style.justifyContent = "flex-start";
+    grid.style.width = "auto";
+    grid.style.maxWidth = "100%";
   }
   if (card) {
-    const minWidth = Math.max(220, thumbSize * 2.2);
-    const maxWidth = Math.min(640, thumbSize * 4);
+    const viewportWidth = Math.max(
+      window.innerWidth || document.documentElement?.clientWidth || 1200,
+      480
+    );
+    const minWidth = Math.max(220, thumbSize * 2);
+    const maxWidth = Math.min(
+      viewportWidth - HOST_MARGIN_PX * 2,
+      Math.max(thumbSize * 4, minWidth + 140)
+    );
     card.style.minWidth = `${Math.round(minWidth)}px`;
     card.style.maxWidth = `${Math.round(maxWidth)}px`;
+    card.style.width = "fit-content";
+    card.style.alignSelf = "flex-start";
     card.style.backgroundColor = "rgba(6, 6, 12, 0.92)";
     card.style.borderColor = "rgba(255, 255, 255, 0.14)";
   }
@@ -161,6 +193,10 @@ function restyleCards(host, runtimeSettings) {
       .querySelectorAll?.(".phg-preview-image")
       ?.forEach((button) => {
         button.style.minHeight = `${Math.round(thumbSize)}px`;
+        const img = button.querySelector?.("img");
+        if (img) {
+          applyResponsiveSizing(button, img, card, runtimeSettings);
+        }
       });
   });
 }
@@ -174,6 +210,110 @@ function clearHostCards(host, beforeRemove) {
     }
     card.remove();
   });
+}
+
+function viewportSize() {
+  if (typeof window === "undefined") {
+    return { width: 1280, height: 720 };
+  }
+  const width =
+    window.innerWidth ||
+    document.documentElement?.clientWidth ||
+    document.body?.clientWidth ||
+    1280;
+  const height =
+    window.innerHeight ||
+    document.documentElement?.clientHeight ||
+    document.body?.clientHeight ||
+    720;
+  return {
+    width: Math.max(width, 320),
+    height: Math.max(height, 320),
+  };
+}
+
+function computePreviewDimensions(img, runtimeSettings) {
+  if (!img?.naturalWidth || !img?.naturalHeight) return null;
+  const { width: viewportWidth, height: viewportHeight } = viewportSize();
+  const landscapePct = clampPercent(
+    Number(
+      runtimeSettings?.landscapeViewportPercent ??
+        DEFAULT_SETTINGS.landscapeViewportPercent
+    ),
+    DEFAULT_SETTINGS.landscapeViewportPercent
+  );
+  const portraitPct = clampPercent(
+    Number(
+      runtimeSettings?.portraitViewportPercent ??
+        DEFAULT_SETTINGS.portraitViewportPercent
+    ),
+    DEFAULT_SETTINGS.portraitViewportPercent
+  );
+  const maxLandscapeWidth = (viewportWidth * landscapePct) / 100;
+  const maxPortraitHeight = (viewportHeight * portraitPct) / 100;
+  const isPortrait = img.naturalHeight > img.naturalWidth;
+  const aspect = img.naturalWidth / Math.max(img.naturalHeight, 1);
+  if (isPortrait) {
+    const targetHeight = Math.min(
+      Math.max(maxPortraitHeight, MIN_IMAGE_SIZE),
+      viewportHeight - HOST_MARGIN_PX * 2
+    );
+    const targetWidth = Math.min(
+      targetHeight * aspect,
+      viewportWidth - HOST_MARGIN_PX * 2
+    );
+    return {
+      width: Math.max(MIN_IMAGE_SIZE, Math.round(targetWidth)),
+      height: Math.max(MIN_IMAGE_SIZE, Math.round(targetHeight)),
+      isPortrait: true,
+    };
+  }
+  const targetWidth = Math.min(
+    Math.max(maxLandscapeWidth, MIN_IMAGE_SIZE),
+    viewportWidth - HOST_MARGIN_PX * 2
+  );
+  const targetHeight = Math.min(
+    targetWidth / (aspect || 1),
+    viewportHeight - HOST_MARGIN_PX * 2
+  );
+  return {
+    width: Math.max(MIN_IMAGE_SIZE, Math.round(targetWidth)),
+    height: Math.max(MIN_IMAGE_SIZE, Math.round(targetHeight)),
+    isPortrait: false,
+  };
+}
+
+function updateCardWidthHint(card, desiredWidth) {
+  if (!card || !desiredWidth) return;
+  const current = Number(card.dataset.maxWidthHint || 0);
+  const next = Math.max(current, desiredWidth);
+  card.dataset.maxWidthHint = String(next);
+  const { width: viewportWidth } = viewportSize();
+  const target = Math.min(
+    viewportWidth - HOST_MARGIN_PX * 2,
+    Math.max(next + 32, Number.parseFloat(card.style.minWidth) || 0)
+  );
+  if (target > 0) {
+    card.style.maxWidth = `${Math.round(target)}px`;
+  }
+}
+
+function applyResponsiveSizing(button, img, card, runtimeSettings) {
+  const dims = computePreviewDimensions(img, runtimeSettings);
+  if (!dims) return;
+  img.style.objectFit = "contain";
+  img.style.width = `${dims.width}px`;
+  img.style.height = `${dims.height}px`;
+  img.style.maxWidth = `${dims.width}px`;
+  img.style.maxHeight = `${dims.height}px`;
+  if (button) {
+    button.style.width = `${dims.width}px`;
+    button.style.height = `${dims.height}px`;
+    button.style.display = "inline-flex";
+    button.style.alignItems = "center";
+    button.style.justifyContent = "center";
+  }
+  updateCardWidthHint(card, dims.width);
 }
 
 function normalizeGeneratedFile(candidate) {
@@ -426,6 +566,11 @@ export function createPreviewNotifier({
           removeCard(card);
         }
       });
+      const applySize = () => applyResponsiveSizing(button, img, card, runtimeSettings);
+      img.addEventListener("load", applySize, { once: false });
+      if (img.complete && img.naturalWidth && img.naturalHeight) {
+        applySize();
+      }
       button.addEventListener("click", (event) => {
         event.preventDefault();
         const gallerySources =
