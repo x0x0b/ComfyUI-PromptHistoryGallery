@@ -1,9 +1,14 @@
 const STORAGE_KEY = "phg.preview.settings";
+
+const MIN_VIEWPORT_PERCENT = 5;
+const MAX_VIEWPORT_PERCENT = 75;
 const DEFAULT_SETTINGS = Object.freeze({
   imageSize: 110,
   displayDuration: 6000,
   position: "bottom-left",
   enabled: true,
+  landscapeViewportPercent: 20,
+  portraitViewportPercent: 40,
 });
 
 export const PREVIEW_POSITIONS = Object.freeze([
@@ -19,6 +24,11 @@ function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
+function clampPercent(value, fallback) {
+  const numeric = Number.isFinite(value) ? value : fallback;
+  return clamp(numeric, MIN_VIEWPORT_PERCENT, MAX_VIEWPORT_PERCENT);
+}
+
 function normalizeSettings(overrides = {}) {
   const normalized = { ...DEFAULT_SETTINGS, ...(overrides || {}) };
   const size = Number(normalized.imageSize);
@@ -32,6 +42,14 @@ function normalizeSettings(overrides = {}) {
     Number.isFinite(duration) ? duration : DEFAULT_SETTINGS.displayDuration,
     1500,
     60000
+  );
+  normalized.landscapeViewportPercent = clampPercent(
+    Number(normalized.landscapeViewportPercent),
+    DEFAULT_SETTINGS.landscapeViewportPercent
+  );
+  normalized.portraitViewportPercent = clampPercent(
+    Number(normalized.portraitViewportPercent),
+    DEFAULT_SETTINGS.portraitViewportPercent
   );
   normalized.position = POSITION_SET.has(normalized.position)
     ? normalized.position
@@ -118,4 +136,9 @@ export function getPreviewSettingsStore() {
   return singletonStore;
 }
 
-export { DEFAULT_SETTINGS };
+export {
+  DEFAULT_SETTINGS,
+  MIN_VIEWPORT_PERCENT,
+  MAX_VIEWPORT_PERCENT,
+  clampPercent,
+};

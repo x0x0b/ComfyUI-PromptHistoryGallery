@@ -2,7 +2,12 @@ import { createHistoryApi } from "./lib/historyApi.js";
 import { buildImageSources } from "./lib/imageSources.js";
 import { createViewerBridge } from "./lib/viewerBridge.js";
 import { createPreviewNotifier, extractEntryIds } from "./lib/previewNotifier.js";
-import { getPreviewSettingsStore, DEFAULT_SETTINGS } from "./lib/previewSettings.js";
+import {
+  getPreviewSettingsStore,
+  DEFAULT_SETTINGS,
+  MIN_VIEWPORT_PERCENT,
+  MAX_VIEWPORT_PERCENT,
+} from "./lib/previewSettings.js";
 
 export {};
 
@@ -33,6 +38,11 @@ const TEXT = {
   settingsHint: "Controls the small pop-up shown after images are generated.",
   settingsToggle: "Show pop-up previews",
   settingsDuration: "Display time",
+  settingsSize: "Preview size",
+  settingsLandscapeSize: "Landscape width (% of viewport width)",
+  settingsPortraitSize: "Portrait height (% of viewport height)",
+  settingsSizeHint:
+    "Landscape & square previews use the width setting. Portrait previews use the height setting.",
   settingsReset: "Reset to defaults",
   settingsClose: "Close settings",
 };
@@ -40,6 +50,8 @@ const TEXT = {
 const PREVIEW_MIN_MS = 1000;
 const PREVIEW_MAX_MS = 15000;
 const PREVIEW_STEP_MS = 250;
+const PREVIEW_MIN_PERCENT = MIN_VIEWPORT_PERCENT;
+const PREVIEW_MAX_PERCENT = MAX_VIEWPORT_PERCENT;
 
 const logInfo = (...messages) => console.info(LOG_PREFIX, ...messages);
 const logError = (...messages) => console.error(LOG_PREFIX, ...messages);
@@ -353,6 +365,42 @@ class HistoryDialog {
         );
       }
     }
+
+    if (this.landscapeInput) {
+      const value = clamp(
+        Number(
+          state.landscapeViewportPercent ?? DEFAULT_SETTINGS.landscapeViewportPercent
+        ),
+        PREVIEW_MIN_PERCENT,
+        PREVIEW_MAX_PERCENT
+      );
+      this.landscapeInput.value = String(value);
+      if (this.landscapeValue) {
+        this.landscapeValue.textContent = `${value}% of viewport width`;
+      }
+      this.landscapeInput.disabled = !enabled;
+      if (this.landscapeField) {
+        this.landscapeField.classList.toggle("phg-settings-field--disabled", !enabled);
+      }
+    }
+
+    if (this.portraitInput) {
+      const value = clamp(
+        Number(
+          state.portraitViewportPercent ?? DEFAULT_SETTINGS.portraitViewportPercent
+        ),
+        PREVIEW_MIN_PERCENT,
+        PREVIEW_MAX_PERCENT
+      );
+      this.portraitInput.value = String(value);
+      if (this.portraitValue) {
+        this.portraitValue.textContent = `${value}% of viewport height`;
+      }
+      this.portraitInput.disabled = !enabled;
+      if (this.portraitField) {
+        this.portraitField.classList.toggle("phg-settings-field--disabled", !enabled);
+      }
+    }
   }
 
   _applySettingsPatch(patch) {
@@ -392,12 +440,29 @@ class HistoryDialog {
     header.append(title, actions);
 
     const grid = createEl("div", "phg-settings-grid");
-    grid.append(this._buildPreviewToggleField(), this._buildDurationField());
+    const displayCard = this._buildSettingsCard("Display", TEXT.settingsHint, [
+      this._buildPreviewToggleField(),
+      this._buildDurationField(),
+    ]);
+    const sizeCard = this._buildSettingsCard("Preview Size", TEXT.settingsSizeHint, [
+      this._buildLandscapeSizeField(),
+      this._buildPortraitSizeField(),
+    ]);
 
-    const hint = createEl("p", "phg-settings-hint", TEXT.settingsHint);
+    grid.append(displayCard, sizeCard);
 
-    panel.append(header, grid, hint);
+    panel.append(header, grid);
     return panel;
+  }
+
+  _buildSettingsCard(title, description, fields = []) {
+    const card = createEl("div", "phg-settings-card");
+    const heading = createEl("div", "phg-settings-card__title", title);
+    const desc = createEl("div", "phg-settings-card__desc", description);
+    const body = createEl("div", "phg-settings-card__fields");
+    fields.forEach((field) => body.append(field));
+    card.append(heading, desc, body);
+    return card;
   }
 
   _buildPreviewToggleField() {
@@ -449,6 +514,74 @@ class HistoryDialog {
     this.durationInput = range;
     this.durationValue = value;
     this.durationField = field;
+    return field;
+  }
+
+  _buildLandscapeSizeField() {
+    const field = createEl("div", "phg-settings-field");
+    const label = createEl("div", "phg-settings-label", TEXT.settingsLandscapeSize);
+    const range = document.createElement("input");
+    range.type = "range";
+    range.min = String(PREVIEW_MIN_PERCENT);
+    range.max = String(PREVIEW_MAX_PERCENT);
+    range.step = "1";
+    const initial = clamp(
+      Number(this.settingsState?.landscapeViewportPercent ?? DEFAULT_SETTINGS.landscapeViewportPercent),
+      PREVIEW_MIN_PERCENT,
+      PREVIEW_MAX_PERCENT
+    );
+    range.value = String(initial);
+    const value = createEl(
+      "div",
+      "phg-settings-value",
+      `${initial}% of viewport width`
+    );
+    range.addEventListener("input", () => {
+      const next = clamp(Number(range.value), PREVIEW_MIN_PERCENT, PREVIEW_MAX_PERCENT);
+      value.textContent = `${next}% of viewport width`;
+    });
+    range.addEventListener("change", () => {
+      const next = clamp(Number(range.value), PREVIEW_MIN_PERCENT, PREVIEW_MAX_PERCENT);
+      this._applySettingsPatch({ landscapeViewportPercent: next });
+    });
+    field.append(label, range, value);
+    this.landscapeInput = range;
+    this.landscapeValue = value;
+    this.landscapeField = field;
+    return field;
+  }
+
+  _buildPortraitSizeField() {
+    const field = createEl("div", "phg-settings-field");
+    const label = createEl("div", "phg-settings-label", TEXT.settingsPortraitSize);
+    const range = document.createElement("input");
+    range.type = "range";
+    range.min = String(PREVIEW_MIN_PERCENT);
+    range.max = String(PREVIEW_MAX_PERCENT);
+    range.step = "1";
+    const initial = clamp(
+      Number(this.settingsState?.portraitViewportPercent ?? DEFAULT_SETTINGS.portraitViewportPercent),
+      PREVIEW_MIN_PERCENT,
+      PREVIEW_MAX_PERCENT
+    );
+    range.value = String(initial);
+    const value = createEl(
+      "div",
+      "phg-settings-value",
+      `${initial}% of viewport height`
+    );
+    range.addEventListener("input", () => {
+      const next = clamp(Number(range.value), PREVIEW_MIN_PERCENT, PREVIEW_MAX_PERCENT);
+      value.textContent = `${next}% of viewport height`;
+    });
+    range.addEventListener("change", () => {
+      const next = clamp(Number(range.value), PREVIEW_MIN_PERCENT, PREVIEW_MAX_PERCENT);
+      this._applySettingsPatch({ portraitViewportPercent: next });
+    });
+    field.append(label, range, value);
+    this.portraitInput = range;
+    this.portraitValue = value;
+    this.portraitField = field;
     return field;
   }
 
