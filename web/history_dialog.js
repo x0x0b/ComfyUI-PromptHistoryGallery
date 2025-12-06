@@ -45,6 +45,9 @@ const TEXT = {
     "Landscape & square previews use the width setting. Portrait previews use the height setting.",
   settingsReset: "Reset to defaults",
   settingsClose: "Close settings",
+  searchPlaceholder: "Search prompts or tags…",
+  searchClear: "Clear search",
+  searchNoResults: "No prompts match your search.",
 };
 
 const PREVIEW_MIN_MS = 1000;
@@ -249,6 +252,7 @@ class HistoryDialog {
       entries: [],
       target: null,
       settingsOpen: false,
+      searchQuery: "",
     };
 
     this.messageTimeout = null;
@@ -607,12 +611,13 @@ class HistoryDialog {
     header.append(titleBlock, actions);
 
     this.statusEl = createEl("div", "phg-dialog__status");
+    this.searchRow = this._buildSearchRow();
     this.listEl = createEl("div", "phg-history-list");
 
     this.settingsPanel = this._buildSettingsPanel();
 
     const body = createEl("div", "phg-dialog__body");
-    body.append(this.settingsPanel, this.statusEl, this.listEl);
+    body.append(this.settingsPanel, this.statusEl, this.searchRow, this.listEl);
 
     this.dialog.append(header, body);
     this.backdrop.appendChild(this.dialog);
@@ -665,6 +670,37 @@ class HistoryDialog {
       });
     }
     return chip;
+  }
+
+  _buildSearchRow() {
+    const row = createEl("div", "phg-search");
+    const input = document.createElement("input");
+    input.type = "search";
+    input.className = "phg-search__input";
+    input.placeholder = TEXT.searchPlaceholder;
+    input.value = this.state.searchQuery;
+    input.addEventListener("input", () => {
+      this.state.searchQuery = input.value;
+      this._renderEntries();
+    });
+
+    const clearBtn = this._createButton(
+      "×",
+      TEXT.searchClear,
+      () => {
+        input.value = "";
+        this.state.searchQuery = "";
+        this._renderEntries();
+        input.focus();
+      },
+      "ghost"
+    );
+    clearBtn.classList.add("phg-search__clear");
+
+    const icon = createEl("span", "phg-search__icon", "🔍");
+    row.append(icon, input, clearBtn);
+    this.searchInput = input;
+    return row;
   }
 
   _buildActions(entry, sources) {
@@ -753,6 +789,8 @@ class HistoryDialog {
   _renderEntries() {
     this.listEl.innerHTML = "";
 
+    const entries = this._filterEntries(this.state.entries);
+
     if (this.state.error) {
       this.listEl.appendChild(this._renderMessage(this.state.error, "error"));
       return;
@@ -763,14 +801,21 @@ class HistoryDialog {
       return;
     }
 
-    if (!this.state.entries.length) {
+    if (!entries.length && this.state.entries.length) {
+      this.listEl.appendChild(
+        this._renderMessage(TEXT.searchNoResults, "muted")
+      );
+      return;
+    }
+
+    if (!entries.length) {
       this.listEl.appendChild(
         this._renderMessage(TEXT.empty, "muted")
       );
       return;
     }
 
-    for (const entry of this.state.entries) {
+    for (const entry of entries) {
       this.listEl.appendChild(this._renderEntry(entry));
     }
   }
@@ -780,6 +825,20 @@ class HistoryDialog {
     box.className = "phg-message" + (tone ? ` phg-message--${tone}` : "");
     box.textContent = text;
     return box;
+  }
+
+  _filterEntries(entries) {
+    if (!Array.isArray(entries) || !entries.length) return [];
+    const query = (this.state.searchQuery ?? "").trim().toLowerCase();
+    if (!query) return entries;
+    return entries.filter((entry) => {
+      const promptText = String(entry.prompt ?? "").toLowerCase();
+      const tags = Array.isArray(entry.tags)
+        ? entry.tags.map((tag) => String(tag ?? "").toLowerCase())
+        : [];
+      if (promptText.includes(query)) return true;
+      return tags.some((tag) => tag.includes(query));
+    });
   }
 
   _renderEntry(entry) {
