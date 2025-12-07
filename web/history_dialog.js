@@ -34,26 +34,24 @@ const TEXT = {
   deleteConfirm: "Delete this prompt history entry?",
   deleteSuccess: "History entry deleted.",
   deleteError: "Failed to delete entry.",
-  settingsTitle: "Preview Popup Settings",
-  settingsHint: "Controls the small pop-up shown after images are generated.",
-  settingsToggle: "Show pop-up previews",
-  settingsDuration: "Display time",
-  settingsSize: "Preview size",
-  settingsLandscapeSize: "Landscape width (% of viewport width)",
-  settingsPortraitSize: "Portrait height (% of viewport height)",
-  settingsSizeHint:
-    "Landscape & square previews use the width setting. Portrait previews use the height setting.",
-  settingsReset: "Reset to defaults",
-  settingsClose: "Close settings",
+  settingsTitle: "Settings",
+  settingsHint: "Quick pop-up shown after images are generated.",
+  settingsToggle: "Enable pop-up",
+  settingsDuration: "Pop-up duration",
+  settingsSize: "Pop-up size",
+  settingsLandscapeSize: "Landscape width (% viewport)",
+  settingsPortraitSize: "Portrait height (% viewport)",
+  settingsSizeHint: "Landscape & square use width; portrait uses height.",
+  settingsReset: "Reset defaults",
+  settingsClose: "Close",
   searchPlaceholder: "Search prompts or tags…",
   searchClear: "Clear search",
   searchNoResults: "No prompts match your search.",
   usageSettingsTitle: "Prompt List",
-  usageSettingsHint:
-    "Highlights prompts that have produced many images in the current view.",
-  usageSettingsToggle: "Color frequently used prompts",
-  usageSettingsFieldHint:
-    "Threshold adapts to the highest image count currently visible.",
+  usageSettingsHint: "Controls how prompts in the list stand out.",
+  usageSettingsToggle: "Highlight frequent prompts",
+  usageSettingsFieldHint: "Based on image count within the current list.",
+  usageSettingsRatio: "Highlight when ≥ % of top images",
 };
 
 const USAGE_RATIO_MIN = 0.05;
@@ -365,6 +363,23 @@ class HistoryDialog {
       this.highlightToggleInput.checked = state.highlightUsage !== false;
     }
 
+    if (this.highlightRatioInput) {
+      const ratioValue = clamp(
+        Number(state.highlightUsageRatio ?? DEFAULT_SETTINGS.highlightUsageRatio),
+        USAGE_RATIO_MIN,
+        USAGE_RATIO_MAX
+      );
+      const percent = Math.round(ratioValue * 100);
+      this.highlightRatioInput.value = String(percent);
+      if (this.highlightRatioValue) {
+        this.highlightRatioValue.textContent = `${percent}% of top image count`;
+      }
+      this.highlightRatioInput.disabled = state.highlightUsage === false;
+      if (this.highlightRatioField) {
+        this.highlightRatioField.classList.toggle("phg-settings-field--disabled", state.highlightUsage === false);
+      }
+    }
+
     if (this.previewToggleInput) {
       this.previewToggleInput.checked = enabled;
     }
@@ -464,21 +479,21 @@ class HistoryDialog {
     header.append(title, actions);
 
     const grid = createEl("div", "phg-settings-grid");
-    const displayCard = this._buildSettingsCard("Display", TEXT.settingsHint, [
+
+    const promptListCard = this._buildSettingsCard(
+      TEXT.usageSettingsTitle,
+      TEXT.usageSettingsHint,
+      [this._buildUsageHighlightField(), this._buildUsageThresholdField()]
+    );
+
+    const popupCard = this._buildSettingsCard("Popup Preview", TEXT.settingsHint, [
       this._buildPreviewToggleField(),
       this._buildDurationField(),
-    ]);
-    const sizeCard = this._buildSettingsCard("Preview Size", TEXT.settingsSizeHint, [
       this._buildLandscapeSizeField(),
       this._buildPortraitSizeField(),
     ]);
-    const usageCard = this._buildSettingsCard(
-      TEXT.usageSettingsTitle,
-      TEXT.usageSettingsHint,
-      [this._buildUsageHighlightField()]
-    );
 
-    grid.append(displayCard, sizeCard, usageCard);
+    grid.append(promptListCard, popupCard);
 
     panel.append(header, grid);
     return panel;
@@ -629,6 +644,39 @@ class HistoryDialog {
     switchLabel.append(input, switchText);
     field.append(label, switchLabel, hint);
     this.highlightToggleInput = input;
+    return field;
+  }
+
+  _buildUsageThresholdField() {
+    const field = createEl("div", "phg-settings-field");
+    const label = createEl("div", "phg-settings-label", TEXT.usageSettingsRatio);
+    const range = document.createElement("input");
+    range.type = "range";
+    range.min = String(Math.round(USAGE_RATIO_MIN * 100));
+    range.max = "100";
+    range.step = "5";
+    const initial = clamp(
+      Math.round(
+        (Number(this.settingsState?.highlightUsageRatio ?? DEFAULT_SETTINGS.highlightUsageRatio ?? 0.80) ||
+          DEFAULT_SETTINGS.highlightUsageRatio) * 100
+      ),
+      Math.round(USAGE_RATIO_MIN * 100),
+      100
+    );
+    range.value = String(initial);
+    const value = createEl("div", "phg-settings-value", `${initial}% of top image count`);
+    range.addEventListener("input", () => {
+      const next = clamp(Number(range.value), Math.round(USAGE_RATIO_MIN * 100), 100);
+      value.textContent = `${next}% of top image count`;
+    });
+    range.addEventListener("change", () => {
+      const next = clamp(Number(range.value), Math.round(USAGE_RATIO_MIN * 100), 100);
+      this._applySettingsPatch({ highlightUsageRatio: next / 100 });
+    });
+    field.append(label, range, value);
+    this.highlightRatioInput = range;
+    this.highlightRatioValue = value;
+    this.highlightRatioField = field;
     return field;
   }
 
