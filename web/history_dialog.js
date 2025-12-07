@@ -48,6 +48,15 @@ const TEXT = {
   searchPlaceholder: "Search prompts or tags…",
   searchClear: "Clear search",
   searchNoResults: "No prompts match your search.",
+  searchNoFavorites: "No favorites match your search.",
+  favoritesToggle: "Show only favorites",
+  favoritesOnly: "Favorites",
+  favoritesEmpty: "No favorites yet. Tap ★ to save prompts.",
+  favoriteAdd: "Added to favorites.",
+  favoriteRemove: "Removed from favorites.",
+  favoriteError: "Failed to update favorite.",
+  favoriteMark: "Add to favorites",
+  favoriteUnmark: "Remove from favorites",
 };
 
 const PREVIEW_MIN_MS = 1000;
@@ -253,6 +262,7 @@ class HistoryDialog {
       target: null,
       settingsOpen: false,
       searchQuery: "",
+      favoritesOnly: false,
     };
 
     this.messageTimeout = null;
@@ -268,6 +278,10 @@ class HistoryDialog {
   }
 
   open() {
+    // Reset to full list on open to avoid hiding history if the filter was left on.
+    if (this.state.favoritesOnly) {
+      this._setFavoritesFilter(false);
+    }
     if (this.state.isOpen) {
       this.refresh();
       return;
@@ -293,7 +307,9 @@ class HistoryDialog {
     this._setLoading(true);
     this._setMessage(TEXT.loading, "muted");
     try {
-      const items = await this.historyApi.list(HISTORY_LIMIT);
+      const items = await this.historyApi.list(HISTORY_LIMIT, {
+        favoriteOnly: this.state.favoritesOnly,
+      });
       this.state.entries = items;
       this.state.error = "";
       this._setMessage("");
@@ -636,10 +652,16 @@ class HistoryDialog {
     });
   }
 
-  _createButton(label, title, onClick, variant = "primary") {
+  _createButton(label, title, onClick, variant = "primary", options = {}) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = `phg-button phg-button--${variant}`;
+    if (options.className) {
+      button.classList.add(options.className);
+    }
+    if (options.active) {
+      button.dataset.active = "true";
+    }
     button.textContent = label;
     button.title = title;
     button.addEventListener("click", (event) => {
@@ -697,10 +719,39 @@ class HistoryDialog {
     );
     clearBtn.classList.add("phg-search__clear");
 
+    const favoritesBtn = this._createButton(
+      `★ ${TEXT.favoritesOnly}`,
+      TEXT.favoritesToggle,
+      () => this._toggleFavoritesFilter(),
+      "ghost",
+      {
+        className: "phg-favorite-toggle",
+        active: this.state.favoritesOnly,
+      }
+    );
+    favoritesBtn.setAttribute("aria-pressed", this.state.favoritesOnly ? "true" : "false");
+
     const icon = createEl("span", "phg-search__icon", "🔍");
-    row.append(icon, input, clearBtn);
+    row.append(icon, input, clearBtn, favoritesBtn);
     this.searchInput = input;
+    this.favoritesFilterBtn = favoritesBtn;
     return row;
+  }
+
+  async _toggleFavoritesFilter(forceValue) {
+    const next =
+      typeof forceValue === "boolean" ? forceValue : !this.state.favoritesOnly;
+    this._setFavoritesFilter(next);
+    await this.refresh();
+  }
+
+  _setFavoritesFilter(value) {
+    const next = Boolean(value);
+    this.state.favoritesOnly = next;
+    if (this.favoritesFilterBtn) {
+      this.favoritesFilterBtn.dataset.active = next ? "true" : "false";
+      this.favoritesFilterBtn.setAttribute("aria-pressed", next ? "true" : "false");
+    }
   }
 
   _buildActions(entry, sources) {
@@ -708,7 +759,19 @@ class HistoryDialog {
     const actions = createEl("div", "phg-entry-card__actions");
 
     const useLabel = this.state.target ? "Use" : "Copy";
+    const favoriteBtn = this._createButton(
+      entry.favorite ? "★" : "☆",
+      entry.favorite ? TEXT.favoriteUnmark : TEXT.favoriteMark,
+      () => this._toggleFavorite(entry),
+      "ghost",
+      {
+        className: "phg-button--icon phg-button--favorite",
+        active: entry.favorite,
+      }
+    );
+
     actions.append(
+      favoriteBtn,
       this._createButton(
         useLabel,
         this.state.target ? "Send prompt to the selected node" : "Copy prompt to clipboard",
@@ -824,14 +887,20 @@ class HistoryDialog {
 
     if (!entries.length && this.state.entries.length) {
       this.listEl.appendChild(
-        this._renderMessage(TEXT.searchNoResults, "muted")
+        this._renderMessage(
+          this.state.favoritesOnly ? TEXT.searchNoFavorites : TEXT.searchNoResults,
+          "muted"
+        )
       );
       return;
     }
 
     if (!entries.length) {
       this.listEl.appendChild(
-        this._renderMessage(TEXT.empty, "muted")
+        this._renderMessage(
+          this.state.favoritesOnly ? TEXT.favoritesEmpty : TEXT.empty,
+          "muted"
+        )
       );
       return;
     }
@@ -890,6 +959,25 @@ class HistoryDialog {
 
     article.append(header, body, metaRow);
     return article;
+  }
+
+  async _toggleFavorite(entry) {
+    if (!entry?.id) return;
+    const nextValue = !entry.favorite;
+    try {
+      await this.historyApi.setFavorite(entry.id, nextValue);
+      const updatedEntries = this.state.entries
+        .map((item) =>
+          item.id === entry.id ? { ...item, favorite: nextValue } : item
+        )
+        .filter((item) => !this.state.favoritesOnly || item.favorite);
+      this.state.entries = updatedEntries;
+      this._renderEntries();
+      this._setMessage(nextValue ? TEXT.favoriteAdd : TEXT.favoriteRemove, "info");
+    } catch (error) {
+      logError("toggle favorite error", error);
+      this._setMessage(TEXT.favoriteError, "error");
+    }
   }
 
   async _handleUse(entry) {

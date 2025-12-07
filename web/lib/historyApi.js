@@ -36,9 +36,13 @@ export function createHistoryApi(api) {
   };
 
   return {
-    async list(limit = DEFAULT_LIMIT) {
+    async list(limit = DEFAULT_LIMIT, options = {}) {
       const safeLimit = Math.max(1, Math.min(Number(limit) || DEFAULT_LIMIT, 200));
-      const payload = await request(`/prompt-history?limit=${safeLimit}`, {
+      const params = new URLSearchParams({ limit: String(safeLimit) });
+      if (options.favoriteOnly) {
+        params.append("favorite", "true");
+      }
+      const payload = await request(`/prompt-history?${params.toString()}`, {
         method: "GET",
         parseJson: true,
       });
@@ -58,6 +62,19 @@ export function createHistoryApi(api) {
     async clear() {
       await request("/prompt-history", {
         method: "DELETE",
+      });
+    },
+
+    async setFavorite(entryId, favorite) {
+      if (!entryId) {
+        throw new Error("Entry id is required.");
+      }
+      await request(`/prompt-history/${entryId}/favorite`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ favorite: Boolean(favorite) }),
       });
     },
   };

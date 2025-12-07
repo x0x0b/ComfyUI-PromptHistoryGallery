@@ -45,6 +45,7 @@ class PromptHistoryEntry:
     tags: List[str]
     metadata: Dict[str, Any]
     last_used_at: str
+    favorite: bool
     files: Tuple[Dict[str, Any], ...] = field(default_factory=tuple)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -58,6 +59,7 @@ class PromptHistoryEntry:
             "tags": list(self.tags),
             "metadata": self.metadata.copy(),
             "last_used_at": self.last_used_at,
+            "favorite": self.favorite,
             "files": [item.copy() for item in self.files],
         }
 
@@ -185,6 +187,7 @@ class PromptHistoryStorage:
             tags=tags,
             metadata=metadata,
             last_used_at=row["last_used_at"],
+            favorite=bool(row["favorite"]),
             files=normalized_files,
         )
 
@@ -203,12 +206,13 @@ class PromptHistoryStorage:
             tags=list(tags),
             metadata=metadata.copy(),
             last_used_at=now_iso,
+            favorite=False,
             files=tuple(),
         )
         cursor.execute(
             """
-            INSERT INTO prompt_history (id, created_at, last_used_at, prompt, tags, metadata)
-            VALUES (:id, :created_at, :last_used_at, :prompt, :tags, :metadata)
+            INSERT INTO prompt_history (id, created_at, last_used_at, prompt, tags, metadata, favorite)
+            VALUES (:id, :created_at, :last_used_at, :prompt, :tags, :metadata, :favorite)
             """,
             {
                 "id": entry.id,
@@ -217,6 +221,7 @@ class PromptHistoryStorage:
                 "prompt": entry.prompt,
                 "tags": _serialize_tags(entry.tags),
                 "metadata": _serialize_metadata(entry.metadata),
+                "favorite": 1 if entry.favorite else 0,
             },
         )
         return entry
@@ -238,7 +243,7 @@ class PromptHistoryStorage:
         }
         row = cursor.execute(
             """
-            SELECT id, created_at, last_used_at, prompt, tags, metadata
+            SELECT id, created_at, last_used_at, prompt, tags, metadata, favorite
             FROM prompt_history
             WHERE prompt = :prompt AND tags = :tags AND metadata = :metadata
             ORDER BY last_used_at DESC
@@ -251,7 +256,7 @@ class PromptHistoryStorage:
 
         fallback_rows = cursor.execute(
             """
-            SELECT id, created_at, last_used_at, prompt, tags, metadata
+            SELECT id, created_at, last_used_at, prompt, tags, metadata, favorite
             FROM prompt_history
             WHERE prompt = ?
             ORDER BY last_used_at DESC, created_at DESC
@@ -308,14 +313,25 @@ class PromptHistoryStorage:
             )
             return entry, True
 
-    def list(self, limit: Optional[int] = None) -> List[PromptHistoryEntry]:
+    def list(
+        self,
+        limit: Optional[int] = None,
+        *,
+        favorite_only: bool = False,
+    ) -> List[PromptHistoryEntry]:
         """
         Return stored entries ordered by creation date descending.
         """
         sql = (
-            "SELECT id, created_at, last_used_at, prompt, tags, metadata "
-            "FROM prompt_history ORDER BY last_used_at DESC, created_at DESC"
+            "SELECT id, created_at, last_used_at, prompt, tags, metadata, favorite "
+            "FROM prompt_history"
         )
+        params: Tuple[Any, ...]
+        if favorite_only:
+            sql += " WHERE favorite = 1"
+
+        sql += " ORDER BY last_used_at DESC, created_at DESC"
+
         if limit is not None:
             sql += " LIMIT ?"
             params = (limit,)
@@ -332,6 +348,20 @@ class PromptHistoryStorage:
             files = tuple(outputs_map.get(row["id"], []))
             entries.append(self._row_to_entry(row, files))
         return entries
+
+    def set_favorite(self, entry_id: str, favorite: bool) -> bool:
+        """
+        Mark a prompt history entry as favorite or remove the flag.
+        Returns True if a row was updated.
+        """
+        if not entry_id:
+            return False
+        with self._locked_cursor(commit=True) as cursor:
+            cursor.execute(
+                "UPDATE prompt_history SET favorite = ? WHERE id = ?",
+                (1 if favorite else 0, entry_id),
+            )
+            return cursor.rowcount > 0
 
     def add_outputs_for_entries(
         self,
@@ -469,7 +499,8 @@ class PromptHistoryStorage:
                     last_used_at TEXT NOT NULL,
                     prompt TEXT NOT NULL,
                     tags TEXT NOT NULL,
-                    metadata TEXT NOT NULL
+                    metadata TEXT NOT NULL,
+                    favorite INTEGER NOT NULL DEFAULT 0
                 )
                 """
             )
@@ -486,6 +517,10 @@ class PromptHistoryStorage:
                     UPDATE prompt_history
                     SET last_used_at = COALESCE(last_used_at, created_at)
                     """
+                )
+            if "favorite" not in existing_columns:
+                cursor.execute(
+                    "ALTER TABLE prompt_history ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0"
                 )
             cursor.execute(
                 """
