@@ -9,6 +9,8 @@ const DEFAULT_SETTINGS = Object.freeze({
   enabled: true,
   landscapeViewportPercent: 20,
   portraitViewportPercent: 40,
+  highlightUsage: true,
+  highlightUsageRatio: 0.80,
 });
 
 export const PREVIEW_POSITIONS = Object.freeze([
@@ -43,6 +45,17 @@ function normalizeSettings(overrides = {}) {
     1500,
     60000
   );
+  const usageRatio = Number(normalized.highlightUsageRatio);
+  normalized.highlightUsageRatio = clamp(
+    Number.isFinite(usageRatio)
+      ? usageRatio
+      : DEFAULT_SETTINGS.highlightUsageRatio,
+    0.05,
+    1
+  );
+  if (typeof normalized.highlightUsage !== "boolean") {
+    normalized.highlightUsage = DEFAULT_SETTINGS.highlightUsage;
+  }
   normalized.landscapeViewportPercent = clampPercent(
     Number(normalized.landscapeViewportPercent),
     DEFAULT_SETTINGS.landscapeViewportPercent

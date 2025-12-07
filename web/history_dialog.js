@@ -48,7 +48,16 @@ const TEXT = {
   searchPlaceholder: "Search prompts or tags…",
   searchClear: "Clear search",
   searchNoResults: "No prompts match your search.",
+  usageSettingsTitle: "Prompt List",
+  usageSettingsHint:
+    "Highlights prompts that have produced many images in the current view.",
+  usageSettingsToggle: "Color frequently used prompts",
+  usageSettingsFieldHint:
+    "Threshold adapts to the highest image count currently visible.",
 };
+
+const USAGE_RATIO_MIN = 0.05;
+const USAGE_RATIO_MAX = 1;
 
 const PREVIEW_MIN_MS = 1000;
 const PREVIEW_MAX_MS = 15000;
@@ -241,8 +250,15 @@ class HistoryDialog {
     this.settingsState = this.settingsStore?.getState?.() ?? DEFAULT_SETTINGS;
     this.unsubscribeSettings =
       this.settingsStore?.subscribe?.((next) => {
+        const previous = this.settingsState;
         this.settingsState = next ?? this.settingsState;
         this._syncSettingsUI();
+        if (
+          previous?.highlightUsage !== this.settingsState?.highlightUsage ||
+          previous?.highlightUsageRatio !== this.settingsState?.highlightUsageRatio
+        ) {
+          this._renderEntries();
+        }
       }) ?? null;
 
     this.state = {
@@ -344,6 +360,10 @@ class HistoryDialog {
       DEFAULT_SETTINGS;
     this.settingsState = state;
     const enabled = state.enabled !== false;
+
+    if (this.highlightToggleInput) {
+      this.highlightToggleInput.checked = state.highlightUsage !== false;
+    }
 
     if (this.previewToggleInput) {
       this.previewToggleInput.checked = enabled;
@@ -452,8 +472,13 @@ class HistoryDialog {
       this._buildLandscapeSizeField(),
       this._buildPortraitSizeField(),
     ]);
+    const usageCard = this._buildSettingsCard(
+      TEXT.usageSettingsTitle,
+      TEXT.usageSettingsHint,
+      [this._buildUsageHighlightField()]
+    );
 
-    grid.append(displayCard, sizeCard);
+    grid.append(displayCard, sizeCard, usageCard);
 
     panel.append(header, grid);
     return panel;
@@ -589,6 +614,24 @@ class HistoryDialog {
     return field;
   }
 
+  _buildUsageHighlightField() {
+    const field = createEl("div", "phg-settings-field");
+    const label = createEl("div", "phg-settings-label", TEXT.usageSettingsToggle);
+    const switchLabel = createEl("label", "phg-switch");
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = this.settingsState?.highlightUsage !== false;
+    input.addEventListener("change", () => {
+      this._applySettingsPatch({ highlightUsage: input.checked });
+    });
+    const switchText = createEl("span", "phg-switch-label", TEXT.usageSettingsToggle);
+    const hint = createEl("p", "phg-settings-hint", TEXT.usageSettingsFieldHint);
+    switchLabel.append(input, switchText);
+    field.append(label, switchLabel, hint);
+    this.highlightToggleInput = input;
+    return field;
+  }
+
   _buildLayout() {
     this.backdrop = createEl("div", "phg-dialog-backdrop phg-hidden");
     this.backdrop.dataset.phg = "history";
@@ -604,7 +647,7 @@ class HistoryDialog {
 
     const actions = createEl("div", "phg-dialog__actions");
     this.refreshBtn = this._createButton("Refresh", "Reload history", () => this.refresh());
-    this.settingsBtn = this._createButton("Settings", "Preview popup settings", () => this._toggleSettings());
+    this.settingsBtn = this._createButton("Settings", "History & preview settings", () => this._toggleSettings());
     this.closeBtn = this._createButton("Close", "Close history", () => this.close(), "ghost");
     actions.append(this.refreshBtn, this.settingsBtn, this.closeBtn);
 
@@ -836,8 +879,45 @@ class HistoryDialog {
       return;
     }
 
-    for (const entry of entries) {
-      this.listEl.appendChild(this._renderEntry(entry));
+    const preparedEntries = entries.map((entry) => {
+      const sources = buildImageSources(entry, this.api);
+      return {
+        entry,
+        sources,
+        imageCount: sources.length,
+      };
+    });
+
+    const maxImages = preparedEntries.reduce(
+      (max, item) => Math.max(max, item.imageCount),
+      0
+    );
+    const highlightEnabled = this.settingsState?.highlightUsage !== false;
+    const ratio = clamp(
+      Number(
+        this.settingsState?.highlightUsageRatio ??
+          DEFAULT_SETTINGS.highlightUsageRatio ??
+          0.80
+      ),
+      USAGE_RATIO_MIN,
+      USAGE_RATIO_MAX
+    );
+    const threshold = maxImages > 0 ? Math.max(1, Math.round(maxImages * ratio)) : null;
+
+    for (const item of preparedEntries) {
+      const usageRaw = maxImages > 0 ? item.imageCount / maxImages : 0;
+      const strength = Math.min(1, maxImages > 0 ? usageRaw / ratio : 0);
+      const highlight = highlightEnabled && maxImages > 0 && item.imageCount > 0;
+
+      this.listEl.appendChild(
+        this._renderEntry(item.entry, item.sources, {
+          imageCount: item.imageCount,
+          maxImages,
+          highlight,
+          highlightStrength: Number.isFinite(strength) ? strength : 0,
+          highlightThreshold: threshold,
+        })
+      );
     }
   }
 
@@ -862,22 +942,55 @@ class HistoryDialog {
     });
   }
 
-  _renderEntry(entry) {
+  _renderEntry(entry, sourcesArg = null, usageMeta = {}) {
     const article = createEl("article", "phg-entry-card");
 
-    const sources = buildImageSources(entry, this.api);
+    const sources = Array.isArray(sourcesArg)
+      ? sourcesArg
+      : buildImageSources(entry, this.api);
     const hasImages = sources.length > 0;
     const preview = hasImages ? sources[sources.length - 1] : null; // latest
 
+    const imageCount = usageMeta.imageCount ?? sources.length;
+    const maxImages = usageMeta.maxImages ?? imageCount;
+    const highlight = Boolean(usageMeta.highlight);
+    const threshold = usageMeta.highlightThreshold;
+    const strength = clamp(Number(usageMeta.highlightStrength ?? 0), 0, 1);
+
+    if (highlight) {
+      article.classList.add("phg-entry-card--popular");
+      article.style.setProperty("--phg-usage-strength", String(strength));
+      article.dataset.usageCount = String(imageCount);
+      if (maxImages) {
+        article.dataset.usageMax = String(maxImages);
+      }
+      if (threshold) {
+        article.dataset.usageThreshold = String(threshold);
+      }
+    }
+
     const header = createEl("div", "phg-entry-card__header");
-    const stamp = createEl("div", "phg-entry-card__stamp", formatTimestamp(entry?.last_used_at ?? entry?.created_at));
+    const stamp = createEl(
+      "div",
+      "phg-entry-card__stamp",
+      formatTimestamp(entry?.last_used_at ?? entry?.created_at)
+    );
     const badges = createEl("div", "phg-entry-card__badges");
     const imagesChip = this._createChip(
-      hasImages ? `${sources.length} image${sources.length === 1 ? "" : "s"}` : "No images",
-      hasImages ? "accent" : "muted",
+      imageCount ? `${imageCount} image${imageCount === 1 ? "" : "s"}` : "No images",
+      highlight ? "popular" : hasImages ? "accent" : "muted",
       hasImages ? () => this._openGallery(entry, sources.length - 1) : null
     );
-    imagesChip.title = hasImages ? "Open generated images" : TEXT.noImages;
+
+    if (highlight) {
+      imagesChip.style.setProperty("--phg-usage-strength", String(strength));
+    }
+
+    imagesChip.title = hasImages
+      ? highlight && Number.isFinite(threshold) && maxImages
+        ? `Frequent prompt: ${imageCount} images (top ${maxImages}, full glow at ≥ ${threshold}). Click to open.`
+        : "Open generated images"
+      : TEXT.noImages;
     badges.append(imagesChip);
     header.append(stamp, badges, this._buildActions(entry, sources));
 
