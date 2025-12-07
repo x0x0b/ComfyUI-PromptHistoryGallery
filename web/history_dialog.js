@@ -50,12 +50,16 @@ const TEXT = {
   usageSettingsTitle: "Prompt List",
   usageSettingsHint: "Controls how prompts in the list stand out.",
   usageSettingsToggle: "Highlight frequent prompts",
-  usageSettingsFieldHint: "Based on image count within the current list.",
   usageSettingsRatio: "Highlight when ≥ % of top images",
+  usageSettingsStart: "Start highlight at images ≥",
+  usageSettingsStartHint: "Highlight begins once a prompt has at least this many images.",
+  usageSettingsRatioHint: "Lower = more prompts glow. Higher = only top prompts glow brightly.",
 };
 
 const USAGE_RATIO_MIN = 0.05;
 const USAGE_RATIO_MAX = 1;
+const USAGE_START_MIN = 1;
+const USAGE_START_MAX = 500;
 
 const PREVIEW_MIN_MS = 1000;
 const PREVIEW_MAX_MS = 15000;
@@ -363,6 +367,23 @@ class HistoryDialog {
       this.highlightToggleInput.checked = state.highlightUsage !== false;
     }
 
+    if (this.highlightStartInput) {
+      const start = clamp(
+        Number(state.highlightUsageStartCount ?? DEFAULT_SETTINGS.highlightUsageStartCount),
+        USAGE_START_MIN,
+        USAGE_START_MAX
+      );
+      this.highlightStartInput.value = String(start);
+      if (this.highlightStartValue) {
+        this.highlightStartValue.textContent = `${start} images`;
+      }
+      const disabled = state.highlightUsage === false;
+      this.highlightStartInput.disabled = disabled;
+      if (this.highlightStartField) {
+        this.highlightStartField.classList.toggle("phg-settings-field--disabled", disabled);
+      }
+    }
+
     if (this.highlightRatioInput) {
       const ratioValue = clamp(
         Number(state.highlightUsageRatio ?? DEFAULT_SETTINGS.highlightUsageRatio),
@@ -483,7 +504,11 @@ class HistoryDialog {
     const promptListCard = this._buildSettingsCard(
       TEXT.usageSettingsTitle,
       TEXT.usageSettingsHint,
-      [this._buildUsageHighlightField(), this._buildUsageThresholdField()]
+      [
+        this._buildUsageHighlightField(),
+        this._buildUsageStartField(),
+        this._buildUsageThresholdField(),
+      ]
     );
 
     const popupCard = this._buildSettingsCard("Popup Preview", TEXT.settingsHint, [
@@ -511,7 +536,6 @@ class HistoryDialog {
 
   _buildPreviewToggleField() {
     const field = createEl("div", "phg-settings-field");
-    const label = createEl("div", "phg-settings-label", TEXT.settingsToggle);
     const switchLabel = createEl("label", "phg-switch");
     const input = document.createElement("input");
     input.type = "checkbox";
@@ -522,7 +546,7 @@ class HistoryDialog {
     });
     const switchText = createEl("span", "phg-switch-label", TEXT.settingsToggle);
     switchLabel.append(input, switchText);
-    field.append(label, switchLabel);
+    field.append(switchLabel);
     this.previewToggleInput = input;
     return field;
   }
@@ -631,7 +655,6 @@ class HistoryDialog {
 
   _buildUsageHighlightField() {
     const field = createEl("div", "phg-settings-field");
-    const label = createEl("div", "phg-settings-label", TEXT.usageSettingsToggle);
     const switchLabel = createEl("label", "phg-switch");
     const input = document.createElement("input");
     input.type = "checkbox";
@@ -640,10 +663,48 @@ class HistoryDialog {
       this._applySettingsPatch({ highlightUsage: input.checked });
     });
     const switchText = createEl("span", "phg-switch-label", TEXT.usageSettingsToggle);
-    const hint = createEl("p", "phg-settings-hint", TEXT.usageSettingsFieldHint);
     switchLabel.append(input, switchText);
-    field.append(label, switchLabel, hint);
+    field.append(switchLabel);
     this.highlightToggleInput = input;
+    return field;
+  }
+
+  _buildUsageStartField() {
+    const field = createEl("div", "phg-settings-field");
+    const label = createEl("div", "phg-settings-label", TEXT.usageSettingsStart);
+    const range = document.createElement("input");
+    range.type = "range";
+    range.min = String(USAGE_START_MIN);
+    range.max = String(USAGE_START_MAX);
+    range.step = "1";
+    const initial = clamp(
+      Number(
+        this.settingsState?.highlightUsageStartCount ??
+          DEFAULT_SETTINGS.highlightUsageStartCount ??
+          5
+      ),
+      USAGE_START_MIN,
+      USAGE_START_MAX
+    );
+    range.value = String(initial);
+    const value = createEl(
+      "div",
+      "phg-settings-value",
+      `${initial} images`
+    );
+    range.addEventListener("input", () => {
+      const next = clamp(Number(range.value), USAGE_START_MIN, USAGE_START_MAX);
+      value.textContent = `${next} images`;
+    });
+    range.addEventListener("change", () => {
+      const next = clamp(Number(range.value), USAGE_START_MIN, USAGE_START_MAX);
+      this._applySettingsPatch({ highlightUsageStartCount: next });
+    });
+    const hint = createEl("div", "phg-settings-hint", TEXT.usageSettingsStartHint);
+    field.append(label, range, value, hint);
+    this.highlightStartInput = range;
+    this.highlightStartValue = value;
+    this.highlightStartField = field;
     return field;
   }
 
@@ -673,7 +734,8 @@ class HistoryDialog {
       const next = clamp(Number(range.value), Math.round(USAGE_RATIO_MIN * 100), 100);
       this._applySettingsPatch({ highlightUsageRatio: next / 100 });
     });
-    field.append(label, range, value);
+    const hint = createEl("div", "phg-settings-hint", TEXT.usageSettingsRatioHint);
+    field.append(label, range, value, hint);
     this.highlightRatioInput = range;
     this.highlightRatioValue = value;
     this.highlightRatioField = field;
@@ -941,6 +1003,15 @@ class HistoryDialog {
       0
     );
     const highlightEnabled = this.settingsState?.highlightUsage !== false;
+    const startCount = clamp(
+      Number(
+        this.settingsState?.highlightUsageStartCount ??
+          DEFAULT_SETTINGS.highlightUsageStartCount ??
+          5
+      ),
+      USAGE_START_MIN,
+      USAGE_START_MAX
+    );
     const ratio = clamp(
       Number(
         this.settingsState?.highlightUsageRatio ??
@@ -950,12 +1021,25 @@ class HistoryDialog {
       USAGE_RATIO_MIN,
       USAGE_RATIO_MAX
     );
-    const threshold = maxImages > 0 ? Math.max(1, Math.round(maxImages * ratio)) : null;
+    const fullGlowAt = maxImages > 1
+      ? Math.max(startCount + 1, Math.round(maxImages * ratio))
+      : null;
 
     for (const item of preparedEntries) {
-      const usageRaw = maxImages > 0 ? item.imageCount / maxImages : 0;
-      const strength = Math.min(1, maxImages > 0 ? usageRaw / ratio : 0);
-      const highlight = highlightEnabled && maxImages > 0 && item.imageCount > 0;
+      const highlight =
+        highlightEnabled &&
+        maxImages >= startCount &&
+        item.imageCount >= startCount;
+
+      const strength = (() => {
+        if (!highlight || !maxImages || !fullGlowAt || fullGlowAt <= startCount) {
+          return 0;
+        }
+        const numerator = item.imageCount - startCount;
+        const denom = fullGlowAt - startCount;
+        if (denom <= 0) return 1;
+        return clamp(numerator / denom, 0, 1);
+      })();
 
       this.listEl.appendChild(
         this._renderEntry(item.entry, item.sources, {
@@ -963,7 +1047,7 @@ class HistoryDialog {
           maxImages,
           highlight,
           highlightStrength: Number.isFinite(strength) ? strength : 0,
-          highlightThreshold: threshold,
+          highlightThreshold: fullGlowAt,
         })
       );
     }
