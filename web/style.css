@@ -91,10 +91,10 @@
   background: linear-gradient(145deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.04));
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 0.75rem;
-  padding: 0.75rem 0.85rem;
+  padding: 0.95rem 1rem;
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
+  gap: 0.6rem;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
 }
 
@@ -112,14 +112,19 @@
 .phg-settings-card__fields {
   display: flex;
   flex-direction: column;
-  gap: 0.45rem;
+  gap: 0.7rem;
 }
 
 .phg-settings-field {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: 0.32rem;
   font-size: 0.8rem;
+  padding: 0.05rem 0;
+}
+
+.phg-settings-field + .phg-settings-field {
+  margin-top: 0.35rem;
 }
 
 .phg-settings-field--disabled {
@@ -174,7 +179,7 @@
 .phg-settings-hint {
   font-size: 0.75rem;
   opacity: 0.7;
-  margin: 0;
+  margin: 0.1rem 0 0;
 }
 
 .phg-switch {

@@ -11,6 +11,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   portraitViewportPercent: 40,
   highlightUsage: true,
   highlightUsageRatio: 0.80,
+  highlightUsageStartCount: 5,
 });
 
 export const PREVIEW_POSITIONS = Object.freeze([
@@ -24,6 +25,13 @@ const POSITION_SET = new Set(PREVIEW_POSITIONS.map((item) => item.value));
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
+}
+
+function clampInt(value, min, max, fallback) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return fallback;
+  const clamped = clamp(Math.round(num), min, max);
+  return clamped;
 }
 
 function clampPercent(value, fallback) {
@@ -56,6 +64,12 @@ function normalizeSettings(overrides = {}) {
   if (typeof normalized.highlightUsage !== "boolean") {
     normalized.highlightUsage = DEFAULT_SETTINGS.highlightUsage;
   }
+  normalized.highlightUsageStartCount = clampInt(
+    normalized.highlightUsageStartCount,
+    1,
+    500,
+    DEFAULT_SETTINGS.highlightUsageStartCount
+  );
   normalized.landscapeViewportPercent = clampPercent(
     Number(normalized.landscapeViewportPercent),
     DEFAULT_SETTINGS.landscapeViewportPercent
