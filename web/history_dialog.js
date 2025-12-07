@@ -1110,13 +1110,9 @@ class HistoryDialog {
     const badges = createEl("div", "phg-entry-card__badges");
     const imagesChip = this._createChip(
       imageCount ? `${imageCount} image${imageCount === 1 ? "" : "s"}` : "No images",
-      highlight ? "popular" : hasImages ? "accent" : "muted",
+      hasImages ? "accent" : "muted",
       hasImages ? () => this._openGallery(entry, sources.length - 1) : null
     );
-
-    if (highlight) {
-      imagesChip.style.setProperty("--phg-usage-strength", String(strength));
-    }
 
     imagesChip.title = hasImages
       ? highlight && Number.isFinite(threshold) && maxImages
