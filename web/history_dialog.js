@@ -932,13 +932,10 @@ class HistoryDialog {
     // We only need Refresh loop here or inside History view.
     // Global Header Actions: Close. (Refresh makes sense in header too).
     this.refreshBtn = this._createButton("🔄", "Reload history", () => this.refresh(), "ghost");
-    this.refreshBtn.style.fontSize = "1.2rem";
-    this.refreshBtn.style.padding = "0.2rem 0.6rem";
+    this.refreshBtn.classList.add("phg-button--icon");
 
     this.closeBtn = this._createButton("×", TEXT.settingsClose, () => this.close(), "ghost");
-    // Make close button look like an icon
-    this.closeBtn.style.fontSize = "1.2rem";
-    this.closeBtn.style.padding = "0.2rem 0.6rem";
+    this.closeBtn.classList.add("phg-button--icon");
 
     actions.append(this.refreshBtn, this.closeBtn);
 

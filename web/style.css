@@ -769,6 +769,15 @@
   background: transparent;
 }
 
+.phg-button--icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.2rem 0.6rem;
+  font-size: 1.2rem;
+  line-height: 1;
+}
+
 .phg-button--danger {
   background: linear-gradient(135deg, rgba(248, 113, 113, 0.24), rgba(248, 113, 113, 0.38));
   border-color: rgba(248, 113, 113, 0.35);
