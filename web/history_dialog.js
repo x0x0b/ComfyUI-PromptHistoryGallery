@@ -418,7 +418,6 @@ class HistoryDialog {
     ]);
 
     // -- Preview Popup --
-    // -- Preview Popup --
     const previewContainer = createEl("div", "phg-settings-group");
 
     // Header with Toggle
