@@ -28,6 +28,6 @@ Each execution appends an entry to a SQLite database (default: `prompt_history_g
 ### Formatting
 
 - Install dev tools: `pip install -e .[dev]` (provides Ruff).
-- Python: run `ruff format .` to format and `ruff check --select I --fix .` to sort imports.
-- Web/JS/CSS: run `npx prettier@3.2.5 -w web` (honors `.prettierignore`; `web/vendor/` is excluded).
-- CI: `.github/workflows/ci.yml` runs `ruff format --check .`, `ruff check --select I .`, and `npx prettier@3.2.5 --check "web/**/*.{js,jsx,ts,tsx,css,scss,html,json,svg}"` on pushes/PRs to `main`.
+- Python: run `ruff format --check .` and `ruff check --select I .` (add `--fix` locally if you want auto-fixes).
+- Web/JS/CSS: run `npx prettier@3.7.4 --check "web/**/*.{js,jsx,ts,tsx,css,scss,html,json}"` (honors `.prettierignore`; `web/vendor/` is excluded).
+- CI: `.github/workflows/ci.yml` runs `ruff format --check .`, `ruff check --select I .`, and `npx prettier@3.7.4 --check "web/**/*.{js,jsx,ts,tsx,css,scss,html,json}"` on pushes/PRs to `main`.
