@@ -72,7 +72,7 @@ function normalizeSettings(overrides = {}) {
   normalized.highlightUsageStartCount = clampInt(
     normalized.highlightUsageStartCount,
     1,
-    500,
+    100,
     DEFAULT_SETTINGS.highlightUsageStartCount
   );
   normalized.landscapeViewportPercent = clampPercent(

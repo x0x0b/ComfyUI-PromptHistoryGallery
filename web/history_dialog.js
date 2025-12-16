@@ -61,7 +61,7 @@ const TEXT = {
 const USAGE_RATIO_MIN = 0.05;
 const USAGE_RATIO_MAX = 1;
 const USAGE_START_MIN = 1;
-const USAGE_START_MAX = 500;
+const USAGE_START_MAX = 100;
 
 const PREVIEW_MIN_MS = 1000;
 const PREVIEW_MAX_MS = 15000;
