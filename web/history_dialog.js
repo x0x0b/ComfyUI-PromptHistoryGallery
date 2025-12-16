@@ -421,10 +421,7 @@ class HistoryDialog {
     const previewContainer = createEl("div", "phg-settings-group");
 
     // Header with Toggle
-    const previewHeader = createEl("div", "phg-settings-group__header");
-    previewHeader.style.display = "flex";
-    previewHeader.style.justifyContent = "space-between";
-    previewHeader.style.alignItems = "center";
+    const previewHeader = createEl("div", "phg-settings-group__header phg-settings-group__header--row");
 
     const previewTitle = createEl("div", "phg-settings-group__title", TEXT.sectionPreview);
 
