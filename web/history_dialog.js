@@ -553,11 +553,11 @@ class HistoryDialog {
       range.value = String(currentVal);
 
       range.addEventListener("input", () => {
-         const val = Number(range.value);
-         valueEl.textContent = formatDisplay(val);
+        const val = Number(range.value);
+        valueEl.textContent = formatDisplay(val);
       });
       range.addEventListener("change", () => {
-         onChange(Number(range.value));
+        onChange(Number(range.value));
       });
 
       control.append(range);
