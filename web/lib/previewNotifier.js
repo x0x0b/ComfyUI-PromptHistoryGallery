@@ -1,10 +1,6 @@
 import { createHistoryApi } from "./historyApi.js";
 import { buildImageSources } from "./imageSources.js";
-import {
-  getPreviewSettingsStore,
-  DEFAULT_SETTINGS,
-  clampPercent,
-} from "./previewSettings.js";
+import { getPreviewSettingsStore, DEFAULT_SETTINGS, clampPercent } from "./previewSettings.js";
 
 const HOST_ATTR = "data-phg-preview-root";
 const DEFAULT_DURATION_MS = 6000;
@@ -42,12 +38,7 @@ function sanitizeEntryId(value) {
   }
   if (typeof value === "object") {
     return sanitizeEntryId(
-      value.id ??
-        value.entry_id ??
-        value.entryId ??
-        value.value ??
-        value.pk ??
-        null
+      value.id ?? value.entry_id ?? value.entryId ?? value.value ?? value.pk ?? null
     );
   }
   return null;
@@ -66,12 +57,7 @@ export function extractEntryIds(payload) {
     }
   }
   const candidate =
-    payload.entry_ids ??
-    payload.entryIds ??
-    payload.ids ??
-    payload.entries ??
-    payload.id ??
-    null;
+    payload.entry_ids ?? payload.entryIds ?? payload.ids ?? payload.entries ?? payload.id ?? null;
   if (Array.isArray(candidate)) {
     return candidate.map(sanitizeEntryId).filter(Boolean);
   }
@@ -93,9 +79,7 @@ function computeRuntimeSettings(settings = {}, fallbackDuration = DEFAULT_DURATI
   const imageSizeRaw = Number(source.imageSize ?? DEFAULT_IMAGE_SIZE);
   return {
     displayDuration: clamp(
-      Number.isFinite(displayDurationRaw)
-        ? displayDurationRaw
-        : DEFAULT_DURATION_MS,
+      Number.isFinite(displayDurationRaw) ? displayDurationRaw : DEFAULT_DURATION_MS,
       MIN_DISPLAY_MS,
       MAX_DISPLAY_MS
     ),
@@ -105,21 +89,14 @@ function computeRuntimeSettings(settings = {}, fallbackDuration = DEFAULT_DURATI
       MAX_IMAGE_SIZE
     ),
     landscapeViewportPercent: clampPercent(
-      Number(
-        source.landscapeViewportPercent ?? DEFAULT_SETTINGS.landscapeViewportPercent
-      ),
+      Number(source.landscapeViewportPercent ?? DEFAULT_SETTINGS.landscapeViewportPercent),
       DEFAULT_SETTINGS.landscapeViewportPercent
     ),
     portraitViewportPercent: clampPercent(
-      Number(
-        source.portraitViewportPercent ?? DEFAULT_SETTINGS.portraitViewportPercent
-      ),
+      Number(source.portraitViewportPercent ?? DEFAULT_SETTINGS.portraitViewportPercent),
       DEFAULT_SETTINGS.portraitViewportPercent
     ),
-    position:
-      typeof source.position === "string"
-        ? source.position
-        : "bottom-left",
+    position: typeof source.position === "string" ? source.position : "bottom-left",
     enabled: useCustom,
   };
 }
@@ -189,15 +166,13 @@ function restyleCards(host, runtimeSettings) {
   cards?.forEach((card) => {
     const grid = card.querySelector?.(".phg-preview-grid") ?? null;
     const thumbSize = applyCardStyles(card, grid, runtimeSettings);
-    card
-      .querySelectorAll?.(".phg-preview-image")
-      ?.forEach((button) => {
-        button.style.minHeight = `${Math.round(thumbSize)}px`;
-        const img = button.querySelector?.("img");
-        if (img) {
-          applyResponsiveSizing(button, img, card, runtimeSettings);
-        }
-      });
+    card.querySelectorAll?.(".phg-preview-image")?.forEach((button) => {
+      button.style.minHeight = `${Math.round(thumbSize)}px`;
+      const img = button.querySelector?.("img");
+      if (img) {
+        applyResponsiveSizing(button, img, card, runtimeSettings);
+      }
+    });
   });
 }
 
@@ -236,17 +211,11 @@ function computePreviewDimensions(img, runtimeSettings) {
   if (!img?.naturalWidth || !img?.naturalHeight) return null;
   const { width: viewportWidth, height: viewportHeight } = viewportSize();
   const landscapePct = clampPercent(
-    Number(
-      runtimeSettings?.landscapeViewportPercent ??
-        DEFAULT_SETTINGS.landscapeViewportPercent
-    ),
+    Number(runtimeSettings?.landscapeViewportPercent ?? DEFAULT_SETTINGS.landscapeViewportPercent),
     DEFAULT_SETTINGS.landscapeViewportPercent
   );
   const portraitPct = clampPercent(
-    Number(
-      runtimeSettings?.portraitViewportPercent ??
-        DEFAULT_SETTINGS.portraitViewportPercent
-    ),
+    Number(runtimeSettings?.portraitViewportPercent ?? DEFAULT_SETTINGS.portraitViewportPercent),
     DEFAULT_SETTINGS.portraitViewportPercent
   );
   const maxLandscapeWidth = (viewportWidth * landscapePct) / 100;
@@ -258,10 +227,7 @@ function computePreviewDimensions(img, runtimeSettings) {
       Math.max(maxPortraitHeight, MIN_IMAGE_SIZE),
       viewportHeight - HOST_MARGIN_PX * 2
     );
-    const targetWidth = Math.min(
-      targetHeight * aspect,
-      viewportWidth - HOST_MARGIN_PX * 2
-    );
+    const targetWidth = Math.min(targetHeight * aspect, viewportWidth - HOST_MARGIN_PX * 2);
     return {
       width: Math.max(MIN_IMAGE_SIZE, Math.round(targetWidth)),
       height: Math.max(MIN_IMAGE_SIZE, Math.round(targetHeight)),
@@ -272,10 +238,7 @@ function computePreviewDimensions(img, runtimeSettings) {
     Math.max(maxLandscapeWidth, MIN_IMAGE_SIZE),
     viewportWidth - HOST_MARGIN_PX * 2
   );
-  const targetHeight = Math.min(
-    targetWidth / (aspect || 1),
-    viewportHeight - HOST_MARGIN_PX * 2
-  );
+  const targetHeight = Math.min(targetWidth / (aspect || 1), viewportHeight - HOST_MARGIN_PX * 2);
   return {
     width: Math.max(MIN_IMAGE_SIZE, Math.round(targetWidth)),
     height: Math.max(MIN_IMAGE_SIZE, Math.round(targetHeight)),
@@ -337,11 +300,7 @@ function normalizeGeneratedFile(candidate) {
   if (candidate.subfolder) {
     record.subfolder = String(candidate.subfolder);
   }
-  const type =
-    candidate.type ??
-    candidate.kind ??
-    candidate.folder ??
-    null;
+  const type = candidate.type ?? candidate.kind ?? candidate.folder ?? null;
   if (type) {
     record.type = String(type);
   }
@@ -367,9 +326,7 @@ function extractGeneratedFiles(payload) {
   if (!Array.isArray(candidate)) {
     return [];
   }
-  return candidate
-    .map(normalizeGeneratedFile)
-    .filter((item) => !!item);
+  return candidate.map(normalizeGeneratedFile).filter((item) => !!item);
 }
 
 export function createPreviewNotifier({
@@ -387,10 +344,7 @@ export function createPreviewNotifier({
   }
 
   const settingsStore = getPreviewSettingsStore();
-  let runtimeSettings = computeRuntimeSettings(
-    settingsStore?.getState?.() ?? {},
-    displayMs
-  );
+  let runtimeSettings = computeRuntimeSettings(settingsStore?.getState?.() ?? {}, displayMs);
   const cardTimers = new WeakMap();
   const recentEntries = new Map();
 
@@ -507,11 +461,7 @@ export function createPreviewNotifier({
     if (!Array.isArray(sources) || !sources.length) {
       return [];
     }
-    if (
-      typeof maxImages === "number" &&
-      Number.isFinite(maxImages) &&
-      maxImages > 0
-    ) {
+    if (typeof maxImages === "number" && Number.isFinite(maxImages) && maxImages > 0) {
       const safeLimit = Math.max(1, Math.floor(maxImages));
       return sources.slice(0, safeLimit);
     }
@@ -551,10 +501,7 @@ export function createPreviewNotifier({
       const button = document.createElement("button");
       button.type = "button";
       button.className = "phg-preview-image";
-      button.setAttribute(
-        "aria-label",
-        source.title ? `Open ${source.title}` : "Open image"
-      );
+      button.setAttribute("aria-label", source.title ? `Open ${source.title}` : "Open image");
       const img = document.createElement("img");
       img.src = source.thumb ?? source.url;
       img.alt = source.title ?? "";
@@ -580,9 +527,7 @@ export function createPreviewNotifier({
         );
         const startIndex = matchedIndex >= 0 ? matchedIndex : index;
         const result =
-          typeof openGallery === "function"
-            ? openGallery(entry, gallerySources, startIndex)
-            : null;
+          typeof openGallery === "function" ? openGallery(entry, gallerySources, startIndex) : null;
         if (result === false) {
           window.open(source.url, "_blank", "noopener,noreferrer");
         } else if (result && typeof result.then === "function") {
@@ -637,9 +582,7 @@ export function createPreviewNotifier({
   };
 
   async function fetchEntriesByIds(entryIds) {
-    const unique = Array.from(
-      new Set(entryIds.map(sanitizeEntryId).filter(Boolean))
-    );
+    const unique = Array.from(new Set(entryIds.map(sanitizeEntryId).filter(Boolean)));
     if (!unique.length) {
       return [];
     }
@@ -647,9 +590,7 @@ export function createPreviewNotifier({
       const limit = Math.max(10, Math.min(200, unique.length * 4));
       const items = await resolvedHistoryApi.list(limit);
       const map = new Map(items.map((entry) => [entry.id, entry]));
-      return unique
-        .map((entryId) => map.get(entryId))
-        .filter((entry) => !!entry);
+      return unique.map((entryId) => map.get(entryId)).filter((entry) => !!entry);
     } catch (error) {
       logError("preview entry fetch failed", error);
       return [];
@@ -704,18 +645,19 @@ export function createPreviewNotifier({
             .map((item) => item?.filename ?? null)
             .filter(Boolean)
         );
-        const match = recent.find((item) =>
-          Array.isArray(item?.files) &&
-          item.files.some((file) => {
-            if (typeof file === "string") {
-              return targetNames.has(file);
-            }
-            if (file && typeof file === "object") {
-              const name = file.filename ?? file.name ?? null;
-              return name ? targetNames.has(String(name)) : false;
-            }
-            return false;
-          })
+        const match = recent.find(
+          (item) =>
+            Array.isArray(item?.files) &&
+            item.files.some((file) => {
+              if (typeof file === "string") {
+                return targetNames.has(file);
+              }
+              if (file && typeof file === "object") {
+                const name = file.filename ?? file.name ?? null;
+                return name ? targetNames.has(String(name)) : false;
+              }
+              return false;
+            })
         );
         if (match) {
           entry = match;
@@ -730,9 +672,7 @@ export function createPreviewNotifier({
       gallerySources = buildImageSources(entry, api);
     }
 
-    const previews = previewSources.length
-      ? previewSources
-      : limitSources(gallerySources);
+    const previews = previewSources.length ? previewSources : limitSources(gallerySources);
     if (!previews.length) {
       return false;
     }
@@ -750,10 +690,7 @@ export function createPreviewNotifier({
       }
       const entryIds = extractEntryIds(event);
       const generatedFiles = extractGeneratedFiles(event);
-      const handledGenerated = await tryShowGeneratedFiles(
-        entryIds,
-        generatedFiles
-      );
+      const handledGenerated = await tryShowGeneratedFiles(entryIds, generatedFiles);
       if (handledGenerated) {
         return;
       }

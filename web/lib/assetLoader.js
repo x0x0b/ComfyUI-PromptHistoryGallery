@@ -25,9 +25,7 @@ export class AssetLoader {
         ? document.head.querySelectorAll('link[rel="stylesheet"]')
         : document.head.querySelectorAll("script");
 
-    return Array.from(collection).find(
-      (node) => node?.dataset?.[this.datasetKey] === url
-    );
+    return Array.from(collection).find((node) => node?.dataset?.[this.datasetKey] === url);
   }
 
   _registerPromise(key, creator) {
@@ -98,9 +96,7 @@ export class AssetLoader {
           script.dataset.phgLoaded = "true";
           resolve(script);
         });
-        script.addEventListener("error", () =>
-          reject(new Error(`Failed to load script: ${src}`))
-        );
+        script.addEventListener("error", () => reject(new Error(`Failed to load script: ${src}`)));
         document.head.appendChild(script);
       });
     });

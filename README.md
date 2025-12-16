@@ -22,3 +22,13 @@ Each execution appends an entry to a SQLite database (default: `prompt_history_g
 - Every entry shows the latest generated image and the total number of captured images for that prompt.
 - Actions: send the prompt back to the node (or copy if no node is active), open the full gallery, copy, and delete.
 - The popup refreshes whenever new prompts finish; quick image previews still appear when generations complete.
+
+## Development
+
+### Formatting
+
+- Install dev tools: `pip install -e .[dev]` (provides Ruff).
+- Python: run `ruff format --check .` and `ruff check --select I .` (add `--fix` locally if you want auto-fixes).
+- Web/JS/CSS: run `npx prettier@3.7.4 --check "web/**/*.{js,jsx,ts,tsx,css,scss,html,json}"` (honors `.prettierignore`; `web/vendor/` is excluded).
+- CI: `.github/workflows/ci.yml` runs `ruff format --check .`, `ruff check --select I .`, and `npx prettier@3.7.4 --check "web/**/*.{js,jsx,ts,tsx,css,scss,html,json}"` on pushes/PRs to `main`.
+- One-shot fixer: `scripts/format.sh` (needs `pipx` and Node) runs Ruff via `pipx run --spec ruff==0.14.9` plus Prettier `-w` to apply fixes.

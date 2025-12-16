@@ -3,7 +3,6 @@ Entry point for ComfyUI to discover the Prompt History Gallery nodes.
 """
 
 from aiohttp import web
-
 from server import PromptServer
 
 from .prompt_history_gallery import (
