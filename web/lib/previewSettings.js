@@ -10,7 +10,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   landscapeViewportPercent: 20,
   portraitViewportPercent: 40,
   highlightUsage: true,
-  highlightUsageRatio: 0.80,
+  highlightUsageRatio: 0.8,
   highlightUsageStartCount: 5,
   historyLimit: 120,
 });
@@ -47,11 +47,7 @@ function clampHistoryLimit(value) {
 function normalizeSettings(overrides = {}) {
   const normalized = { ...DEFAULT_SETTINGS, ...(overrides || {}) };
   const size = Number(normalized.imageSize);
-  normalized.imageSize = clamp(
-    Number.isFinite(size) ? size : DEFAULT_SETTINGS.imageSize,
-    72,
-    220
-  );
+  normalized.imageSize = clamp(Number.isFinite(size) ? size : DEFAULT_SETTINGS.imageSize, 72, 220);
   const duration = Number(normalized.displayDuration);
   normalized.displayDuration = clamp(
     Number.isFinite(duration) ? duration : DEFAULT_SETTINGS.displayDuration,
@@ -60,9 +56,7 @@ function normalizeSettings(overrides = {}) {
   );
   const usageRatio = Number(normalized.highlightUsageRatio);
   normalized.highlightUsageRatio = clamp(
-    Number.isFinite(usageRatio)
-      ? usageRatio
-      : DEFAULT_SETTINGS.highlightUsageRatio,
+    Number.isFinite(usageRatio) ? usageRatio : DEFAULT_SETTINGS.highlightUsageRatio,
     0.05,
     1
   );
@@ -169,9 +163,4 @@ export function getPreviewSettingsStore() {
   return singletonStore;
 }
 
-export {
-  DEFAULT_SETTINGS,
-  MIN_VIEWPORT_PERCENT,
-  MAX_VIEWPORT_PERCENT,
-  clampPercent,
-};
+export { DEFAULT_SETTINGS, MIN_VIEWPORT_PERCENT, MAX_VIEWPORT_PERCENT, clampPercent };

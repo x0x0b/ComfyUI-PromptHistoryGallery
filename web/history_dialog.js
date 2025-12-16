@@ -110,12 +110,7 @@ function resolveComfyApp() {
 
 function resolveComfyApi() {
   const comfyApp = resolveComfyApp();
-  return (
-    comfyApp?.api ??
-    window.comfyAPI?.api?.api ??
-    window.comfyAPI?.api ??
-    null
-  );
+  return comfyApp?.api ?? window.comfyAPI?.api?.api ?? window.comfyAPI?.api ?? null;
 }
 
 function resolvePromptWidget(node) {
@@ -131,7 +126,7 @@ function normalizeTargetPayload(node) {
   const nodeTitle =
     typeof node.getTitle === "function"
       ? node.getTitle()
-      : node.title ?? node.comfyClass ?? "Prompt History Input";
+      : (node.title ?? node.comfyClass ?? "Prompt History Input");
   return {
     nodeId,
     graph: node.graph ?? null,
@@ -174,9 +169,8 @@ function resolveNodeFromTarget(target) {
 
 function applyPromptToWidget(node, widget, promptText) {
   if (!node || !widget) return false;
-  const normalized =
-    typeof promptText === "string" ? promptText : String(promptText ?? "");
-  const previous = typeof widget.value === "string" ? widget.value : widget.value ?? "";
+  const normalized = typeof promptText === "string" ? promptText : String(promptText ?? "");
+  const previous = typeof widget.value === "string" ? widget.value : (widget.value ?? "");
   if (previous === normalized) {
     return false;
   }
@@ -263,10 +257,7 @@ class HistoryDialog {
         ) {
           this._renderEntries();
         }
-        if (
-          previous?.historyLimit !== this.settingsState?.historyLimit &&
-          this.state?.isOpen
-        ) {
+        if (previous?.historyLimit !== this.settingsState?.historyLimit && this.state?.isOpen) {
           this.refresh();
         }
       }) ?? null;
@@ -340,8 +331,7 @@ class HistoryDialog {
   }
 
   _getHistoryLimit() {
-    const settingValue =
-      this.settingsState?.historyLimit ?? DEFAULT_SETTINGS.historyLimit;
+    const settingValue = this.settingsState?.historyLimit ?? DEFAULT_SETTINGS.historyLimit;
     return clamp(
       Number(settingValue) || DEFAULT_SETTINGS.historyLimit,
       HISTORY_LIMIT_MIN,
@@ -353,7 +343,7 @@ class HistoryDialog {
     this.state.activeTab = tabId;
 
     // Update Tab Buttons
-    [this.historyTabBtn, this.settingsTabBtn].forEach(btn => {
+    [this.historyTabBtn, this.settingsTabBtn].forEach((btn) => {
       if (btn) btn.dataset.active = btn.dataset.tab === tabId ? "true" : "false";
     });
 
@@ -392,36 +382,47 @@ class HistoryDialog {
 
     // -- List Appearance --
     const listGroup = this._buildSettingsGroup(TEXT.sectionUsage, [
-        this._buildHistoryLimitField(),
-        this._buildToggleField(
-          TEXT.usageSettingsHighlight,
-          () => this.settingsState?.highlightUsage !== false,
-          (checked) => this._applySettingsPatch({ highlightUsage: checked }),
-          "highlightToggleInput"
-        ),
-        this._buildNumberField(
-          TEXT.usageSettingsStart,
-          () => this.settingsState?.highlightUsageStartCount ?? DEFAULT_SETTINGS.highlightUsageStartCount,
-          (val) => this._applySettingsPatch({ highlightUsageStartCount: val }),
-          USAGE_START_MIN, USAGE_START_MAX, 1,
-          (v) => `${v} images`,
-          "highlightStartInput"
-        ),
-        this._buildNumberField(
-          TEXT.usageSettingsRatio,
-          () => Math.round((this.settingsState?.highlightUsageRatio ?? DEFAULT_SETTINGS.highlightUsageRatio) * 100),
-          (val) => this._applySettingsPatch({ highlightUsageRatio: val / 100 }),
-          Math.round(USAGE_RATIO_MIN * 100), 100, 5,
-          (v) => `${v}%`,
-          "highlightRatioInput"
-        ),
+      this._buildHistoryLimitField(),
+      this._buildToggleField(
+        TEXT.usageSettingsHighlight,
+        () => this.settingsState?.highlightUsage !== false,
+        (checked) => this._applySettingsPatch({ highlightUsage: checked }),
+        "highlightToggleInput"
+      ),
+      this._buildNumberField(
+        TEXT.usageSettingsStart,
+        () =>
+          this.settingsState?.highlightUsageStartCount ?? DEFAULT_SETTINGS.highlightUsageStartCount,
+        (val) => this._applySettingsPatch({ highlightUsageStartCount: val }),
+        USAGE_START_MIN,
+        USAGE_START_MAX,
+        1,
+        (v) => `${v} images`,
+        "highlightStartInput"
+      ),
+      this._buildNumberField(
+        TEXT.usageSettingsRatio,
+        () =>
+          Math.round(
+            (this.settingsState?.highlightUsageRatio ?? DEFAULT_SETTINGS.highlightUsageRatio) * 100
+          ),
+        (val) => this._applySettingsPatch({ highlightUsageRatio: val / 100 }),
+        Math.round(USAGE_RATIO_MIN * 100),
+        100,
+        5,
+        (v) => `${v}%`,
+        "highlightRatioInput"
+      ),
     ]);
 
     // -- Preview Popup --
     const previewContainer = createEl("div", "phg-settings-group");
 
     // Header with Toggle
-    const previewHeader = createEl("div", "phg-settings-group__header phg-settings-group__header--row");
+    const previewHeader = createEl(
+      "div",
+      "phg-settings-group__header phg-settings-group__header--row"
+    );
 
     const previewTitle = createEl("div", "phg-settings-group__title", TEXT.sectionPreview);
 
@@ -441,43 +442,51 @@ class HistoryDialog {
     // Collapsible Content
     const previewContent = createEl("div", "phg-settings-group__content");
     if (!toggleInput.checked) {
-        previewContent.style.display = "none";
+      previewContent.style.display = "none";
     }
 
     // Toggle Logic
     toggleInput.addEventListener("change", () => {
-        const checked = toggleInput.checked;
-        this._applySettingsPatch({ enabled: checked });
-        previewContent.style.display = checked ? "block" : "none";
+      const checked = toggleInput.checked;
+      this._applySettingsPatch({ enabled: checked });
+      previewContent.style.display = checked ? "block" : "none";
     });
     this.previewToggleInput = toggleInput; // Bind for sync
 
     // Add items to content
     previewContent.append(
-        this._buildNumberField(
-            TEXT.previewDuration,
-            () => this.settingsState?.displayDuration ?? DEFAULT_SETTINGS.displayDuration,
-            (val) => this._applySettingsPatch({ displayDuration: val }),
-            PREVIEW_MIN_MS, PREVIEW_MAX_MS, PREVIEW_STEP_MS,
-            (v) => this._formatDuration(v),
-            "durationInput"
-        ),
-        this._buildNumberField(
-          TEXT.previewSizeLandscape,
-          () => this.settingsState?.landscapeViewportPercent ?? DEFAULT_SETTINGS.landscapeViewportPercent,
-          (val) => this._applySettingsPatch({ landscapeViewportPercent: val }),
-          PREVIEW_MIN_PERCENT, PREVIEW_MAX_PERCENT, 1,
-          (v) => `${v}%`,
-          "landscapeInput"
-        ),
-        this._buildNumberField(
-          TEXT.previewSizePortrait,
-          () => this.settingsState?.portraitViewportPercent ?? DEFAULT_SETTINGS.portraitViewportPercent,
-          (val) => this._applySettingsPatch({ portraitViewportPercent: val }),
-          PREVIEW_MIN_PERCENT, PREVIEW_MAX_PERCENT, 1,
-          (v) => `${v}%`,
-          "portraitInput"
-        )
+      this._buildNumberField(
+        TEXT.previewDuration,
+        () => this.settingsState?.displayDuration ?? DEFAULT_SETTINGS.displayDuration,
+        (val) => this._applySettingsPatch({ displayDuration: val }),
+        PREVIEW_MIN_MS,
+        PREVIEW_MAX_MS,
+        PREVIEW_STEP_MS,
+        (v) => this._formatDuration(v),
+        "durationInput"
+      ),
+      this._buildNumberField(
+        TEXT.previewSizeLandscape,
+        () =>
+          this.settingsState?.landscapeViewportPercent ?? DEFAULT_SETTINGS.landscapeViewportPercent,
+        (val) => this._applySettingsPatch({ landscapeViewportPercent: val }),
+        PREVIEW_MIN_PERCENT,
+        PREVIEW_MAX_PERCENT,
+        1,
+        (v) => `${v}%`,
+        "landscapeInput"
+      ),
+      this._buildNumberField(
+        TEXT.previewSizePortrait,
+        () =>
+          this.settingsState?.portraitViewportPercent ?? DEFAULT_SETTINGS.portraitViewportPercent,
+        (val) => this._applySettingsPatch({ portraitViewportPercent: val }),
+        PREVIEW_MIN_PERCENT,
+        PREVIEW_MAX_PERCENT,
+        1,
+        (v) => `${v}%`,
+        "portraitInput"
+      )
     );
 
     previewContainer.append(previewHeader, previewContent);
@@ -485,10 +494,10 @@ class HistoryDialog {
 
     const footer = createEl("div", "phg-settings-footer");
     const resetBtn = this._createButton(
-        TEXT.settingsReset,
-        "Restore defaults",
-        () => this._resetSettings(),
-        "ghost"
+      TEXT.settingsReset,
+      "Restore defaults",
+      () => this._resetSettings(),
+      "ghost"
     );
     footer.append(resetBtn);
 
@@ -497,73 +506,73 @@ class HistoryDialog {
   }
 
   _buildSettingsGroup(title, items) {
-      const group = createEl("div", "phg-settings-group");
-      const header = createEl("div", "phg-settings-group__header");
-      const titleEl = createEl("div", "phg-settings-group__title", title);
-      header.append(titleEl);
-      group.append(header, ...items);
-      return group;
+    const group = createEl("div", "phg-settings-group");
+    const header = createEl("div", "phg-settings-group__header");
+    const titleEl = createEl("div", "phg-settings-group__title", title);
+    header.append(titleEl);
+    group.append(header, ...items);
+    return group;
   }
 
   _buildToggleField(label, getValue, onChange, refName) {
-      const item = createEl("div", "phg-settings-item");
-      const info = createEl("div", "phg-settings-item__info");
-      info.append(createEl("div", "phg-settings-item__label", label));
+    const item = createEl("div", "phg-settings-item");
+    const info = createEl("div", "phg-settings-item__info");
+    info.append(createEl("div", "phg-settings-item__label", label));
 
-      const control = createEl("div", "phg-settings-control");
-      const toggle = createEl("label", "phg-toggle");
-      const input = document.createElement("input");
-      input.type = "checkbox";
-      input.checked = getValue();
-      input.addEventListener("change", () => onChange(input.checked));
+    const control = createEl("div", "phg-settings-control");
+    const toggle = createEl("label", "phg-toggle");
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = getValue();
+    input.addEventListener("change", () => onChange(input.checked));
 
-      const slider = createEl("span", "phg-toggle-slider");
-      toggle.append(input, slider);
-      control.append(toggle);
+    const slider = createEl("span", "phg-toggle-slider");
+    toggle.append(input, slider);
+    control.append(toggle);
 
-      item.append(info, control);
+    item.append(info, control);
 
-      if (refName) this[refName] = input;
-      return item;
+    if (refName) this[refName] = input;
+    return item;
   }
 
   _buildNumberField(label, getValue, onChange, min, max, step, formatDisplay, refName) {
-      const item = createEl("div", "phg-settings-item phg-settings-item--col");
+    const item = createEl("div", "phg-settings-item phg-settings-item--col");
 
-      const headerObj = createEl("div", "phg-settings-item__header");
+    const headerObj = createEl("div", "phg-settings-item__header");
 
-      const labelEl = createEl("div", "phg-settings-item__label", label);
-      const valueEl = createEl("div", "phg-range-value");
-      const currentVal = getValue();
-      valueEl.textContent = formatDisplay(currentVal);
+    const labelEl = createEl("div", "phg-settings-item__label", label);
+    const valueEl = createEl("div", "phg-range-value");
+    const currentVal = getValue();
+    valueEl.textContent = formatDisplay(currentVal);
 
-      headerObj.append(labelEl, valueEl);
+    headerObj.append(labelEl, valueEl);
 
-      const control = createEl("div", "phg-range-wrapper");
-      const range = document.createElement("input");
-      range.type = "range";
-      range.className = "phg-range";
-      range.min = String(min);
-      range.max = String(max);
-      range.step = String(step);
-      range.value = String(currentVal);
+    const control = createEl("div", "phg-range-wrapper");
+    const range = document.createElement("input");
+    range.type = "range";
+    range.className = "phg-range";
+    range.min = String(min);
+    range.max = String(max);
+    range.step = String(step);
+    range.value = String(currentVal);
 
-      range.addEventListener("input", () => {
-         const val = Number(range.value);
-         valueEl.textContent = formatDisplay(val);
-      });
-      range.addEventListener("change", () => {
-         onChange(Number(range.value));
-      });
+    range.addEventListener("input", () => {
+      const val = Number(range.value);
+      valueEl.textContent = formatDisplay(val);
+    });
+    range.addEventListener("change", () => {
+      onChange(Number(range.value));
+    });
 
-      control.append(range);
-      item.append(headerObj, control);
+    control.append(range);
+    item.append(headerObj, control);
 
-      if (refName) this[refName] = range;
-      // We can also store the value label to update it if state changes externally
-      if (refName) this[refName + "Display"] = valueEl;
+    if (refName) this[refName] = range;
+    // We can also store the value label to update it if state changes externally
+    if (refName) this[refName + "Display"] = valueEl;
 
-      return item;
+    return item;
   }
   _buildHistoryLimitField() {
     const getValue = () => this._getHistoryLimit();
@@ -586,11 +595,15 @@ class HistoryDialog {
     range.value = String(getValue());
 
     range.addEventListener("input", () => {
-       this.historyLimitValue.textContent = `${range.value} items`;
+      this.historyLimitValue.textContent = `${range.value} items`;
     });
     range.addEventListener("change", () => {
-       const next = clamp(Number(range.value) || DEFAULT_SETTINGS.historyLimit, HISTORY_LIMIT_MIN, HISTORY_LIMIT_MAX);
-       this._applySettingsPatch({ historyLimit: next });
+      const next = clamp(
+        Number(range.value) || DEFAULT_SETTINGS.historyLimit,
+        HISTORY_LIMIT_MIN,
+        HISTORY_LIMIT_MAX
+      );
+      this._applySettingsPatch({ historyLimit: next });
     });
 
     control.append(range);
@@ -605,80 +618,91 @@ class HistoryDialog {
 
     // History Limit
     if (this.historyLimitRange) {
-        const limit = this._getHistoryLimit();
-        this.historyLimitRange.value = String(limit);
-        if (this.historyLimitValue) this.historyLimitValue.textContent = `${limit} items`;
+      const limit = this._getHistoryLimit();
+      this.historyLimitRange.value = String(limit);
+      if (this.historyLimitValue) this.historyLimitValue.textContent = `${limit} items`;
     }
 
     // Toggle: Highlight Usage
     if (this.highlightToggleInput) {
-        this.highlightToggleInput.checked = state.highlightUsage !== false;
+      this.highlightToggleInput.checked = state.highlightUsage !== false;
     }
 
     // Number: Highlight Start
     if (this.highlightStartInput) {
-         const start = clamp(
-            Number(state.highlightUsageStartCount ?? DEFAULT_SETTINGS.highlightUsageStartCount),
-            USAGE_START_MIN, USAGE_START_MAX
-         );
-         this.highlightStartInput.value = String(start);
-         if (this.highlightStartInputDisplay) {
-            this.highlightStartInputDisplay.textContent = `${start} images`;
-         }
-         this.highlightStartInput.disabled = state.highlightUsage === false;
+      const start = clamp(
+        Number(state.highlightUsageStartCount ?? DEFAULT_SETTINGS.highlightUsageStartCount),
+        USAGE_START_MIN,
+        USAGE_START_MAX
+      );
+      this.highlightStartInput.value = String(start);
+      if (this.highlightStartInputDisplay) {
+        this.highlightStartInputDisplay.textContent = `${start} images`;
+      }
+      this.highlightStartInput.disabled = state.highlightUsage === false;
     }
 
     // Number: Ratio
     if (this.highlightRatioInput) {
-        const ratioValue = clamp(
-            Number(state.highlightUsageRatio ?? DEFAULT_SETTINGS.highlightUsageRatio),
-            USAGE_RATIO_MIN, USAGE_RATIO_MAX
-        );
-        const percent = Math.round(ratioValue * 100);
-        this.highlightRatioInput.value = String(percent);
-        if (this.highlightRatioInputDisplay) {
-            this.highlightRatioInputDisplay.textContent = `${percent}%`;
-        }
-        this.highlightRatioInput.disabled = state.highlightUsage === false;
+      const ratioValue = clamp(
+        Number(state.highlightUsageRatio ?? DEFAULT_SETTINGS.highlightUsageRatio),
+        USAGE_RATIO_MIN,
+        USAGE_RATIO_MAX
+      );
+      const percent = Math.round(ratioValue * 100);
+      this.highlightRatioInput.value = String(percent);
+      if (this.highlightRatioInputDisplay) {
+        this.highlightRatioInputDisplay.textContent = `${percent}%`;
+      }
+      this.highlightRatioInput.disabled = state.highlightUsage === false;
     }
 
     // Toggle: Preview
     if (this.previewToggleInput) {
-        const isEnabled = state.enabled !== false;
-        this.previewToggleInput.checked = isEnabled;
-        // Update content visibility
-        const toggleLabel = this.previewToggleInput.closest('.phg-settings-control');
-        const header = toggleLabel?.parentNode;
-        const content = header?.nextElementSibling;
-        if (content && content.classList.contains('phg-settings-group__content')) {
-            content.style.display = isEnabled ? 'block' : 'none';
-        }
+      const isEnabled = state.enabled !== false;
+      this.previewToggleInput.checked = isEnabled;
+      // Update content visibility
+      const toggleLabel = this.previewToggleInput.closest(".phg-settings-control");
+      const header = toggleLabel?.parentNode;
+      const content = header?.nextElementSibling;
+      if (content && content.classList.contains("phg-settings-group__content")) {
+        content.style.display = isEnabled ? "block" : "none";
+      }
     }
 
     // Number: Duration
     if (this.durationInput) {
-        const val = clamp(
-            Number(state.displayDuration ?? DEFAULT_SETTINGS.displayDuration),
-            PREVIEW_MIN_MS, PREVIEW_MAX_MS
-        );
-        this.durationInput.value = String(val);
-        if (this.durationInputDisplay) {
-            this.durationInputDisplay.textContent = this._formatDuration(val);
-        }
+      const val = clamp(
+        Number(state.displayDuration ?? DEFAULT_SETTINGS.displayDuration),
+        PREVIEW_MIN_MS,
+        PREVIEW_MAX_MS
+      );
+      this.durationInput.value = String(val);
+      if (this.durationInputDisplay) {
+        this.durationInputDisplay.textContent = this._formatDuration(val);
+      }
     }
 
     // Number: Landscape
     if (this.landscapeInput) {
-        const val = clamp(Number(state.landscapeViewportPercent ?? DEFAULT_SETTINGS.landscapeViewportPercent), PREVIEW_MIN_PERCENT, PREVIEW_MAX_PERCENT);
-        this.landscapeInput.value = String(val);
-        if (this.landscapeInputDisplay) this.landscapeInputDisplay.textContent = `${val}%`;
+      const val = clamp(
+        Number(state.landscapeViewportPercent ?? DEFAULT_SETTINGS.landscapeViewportPercent),
+        PREVIEW_MIN_PERCENT,
+        PREVIEW_MAX_PERCENT
+      );
+      this.landscapeInput.value = String(val);
+      if (this.landscapeInputDisplay) this.landscapeInputDisplay.textContent = `${val}%`;
     }
 
-     // Number: Portrait
+    // Number: Portrait
     if (this.portraitInput) {
-        const val = clamp(Number(state.portraitViewportPercent ?? DEFAULT_SETTINGS.portraitViewportPercent), PREVIEW_MIN_PERCENT, PREVIEW_MAX_PERCENT);
-        this.portraitInput.value = String(val);
-        if (this.portraitInputDisplay) this.portraitInputDisplay.textContent = `${val}%`;
+      const val = clamp(
+        Number(state.portraitViewportPercent ?? DEFAULT_SETTINGS.portraitViewportPercent),
+        PREVIEW_MIN_PERCENT,
+        PREVIEW_MAX_PERCENT
+      );
+      this.portraitInput.value = String(val);
+      if (this.portraitInputDisplay) this.portraitInputDisplay.textContent = `${val}%`;
     }
   }
 
@@ -742,16 +766,14 @@ class HistoryDialog {
     range.max = String(PREVIEW_MAX_PERCENT);
     range.step = "1";
     const initial = clamp(
-      Number(this.settingsState?.landscapeViewportPercent ?? DEFAULT_SETTINGS.landscapeViewportPercent),
+      Number(
+        this.settingsState?.landscapeViewportPercent ?? DEFAULT_SETTINGS.landscapeViewportPercent
+      ),
       PREVIEW_MIN_PERCENT,
       PREVIEW_MAX_PERCENT
     );
     range.value = String(initial);
-    const value = createEl(
-      "div",
-      "phg-settings-value",
-      `${initial}% of viewport width`
-    );
+    const value = createEl("div", "phg-settings-value", `${initial}% of viewport width`);
     range.addEventListener("input", () => {
       const next = clamp(Number(range.value), PREVIEW_MIN_PERCENT, PREVIEW_MAX_PERCENT);
       value.textContent = `${next}% of viewport width`;
@@ -776,16 +798,14 @@ class HistoryDialog {
     range.max = String(PREVIEW_MAX_PERCENT);
     range.step = "1";
     const initial = clamp(
-      Number(this.settingsState?.portraitViewportPercent ?? DEFAULT_SETTINGS.portraitViewportPercent),
+      Number(
+        this.settingsState?.portraitViewportPercent ?? DEFAULT_SETTINGS.portraitViewportPercent
+      ),
       PREVIEW_MIN_PERCENT,
       PREVIEW_MAX_PERCENT
     );
     range.value = String(initial);
-    const value = createEl(
-      "div",
-      "phg-settings-value",
-      `${initial}% of viewport height`
-    );
+    const value = createEl("div", "phg-settings-value", `${initial}% of viewport height`);
     range.addEventListener("input", () => {
       const next = clamp(Number(range.value), PREVIEW_MIN_PERCENT, PREVIEW_MAX_PERCENT);
       value.textContent = `${next}% of viewport height`;
@@ -835,11 +855,7 @@ class HistoryDialog {
       USAGE_START_MAX
     );
     range.value = String(initial);
-    const value = createEl(
-      "div",
-      "phg-settings-value",
-      `${initial} images`
-    );
+    const value = createEl("div", "phg-settings-value", `${initial} images`);
     range.addEventListener("input", () => {
       const next = clamp(Number(range.value), USAGE_START_MIN, USAGE_START_MAX);
       value.textContent = `${next} images`;
@@ -866,8 +882,9 @@ class HistoryDialog {
     range.step = "5";
     const initial = clamp(
       Math.round(
-        (Number(this.settingsState?.highlightUsageRatio ?? DEFAULT_SETTINGS.highlightUsageRatio ?? 0.80) ||
-          DEFAULT_SETTINGS.highlightUsageRatio) * 100
+        (Number(
+          this.settingsState?.highlightUsageRatio ?? DEFAULT_SETTINGS.highlightUsageRatio ?? 0.8
+        ) || DEFAULT_SETTINGS.highlightUsageRatio) * 100
       ),
       Math.round(USAGE_RATIO_MIN * 100),
       100
@@ -1156,16 +1173,12 @@ class HistoryDialog {
     }
 
     if (!entries.length && this.state.entries.length) {
-      this.listEl.appendChild(
-        this._renderMessage(TEXT.searchNoResults, "muted")
-      );
+      this.listEl.appendChild(this._renderMessage(TEXT.searchNoResults, "muted"));
       return;
     }
 
     if (!entries.length) {
-      this.listEl.appendChild(
-        this._renderMessage(TEXT.empty, "muted")
-      );
+      this.listEl.appendChild(this._renderMessage(TEXT.empty, "muted"));
       return;
     }
 
@@ -1178,10 +1191,7 @@ class HistoryDialog {
       };
     });
 
-    const maxImages = preparedEntries.reduce(
-      (max, item) => Math.max(max, item.imageCount),
-      0
-    );
+    const maxImages = preparedEntries.reduce((max, item) => Math.max(max, item.imageCount), 0);
     const highlightEnabled = this.settingsState?.highlightUsage !== false;
     const startCount = clamp(
       Number(
@@ -1194,22 +1204,17 @@ class HistoryDialog {
     );
     const ratio = clamp(
       Number(
-        this.settingsState?.highlightUsageRatio ??
-          DEFAULT_SETTINGS.highlightUsageRatio ??
-          0.80
+        this.settingsState?.highlightUsageRatio ?? DEFAULT_SETTINGS.highlightUsageRatio ?? 0.8
       ),
       USAGE_RATIO_MIN,
       USAGE_RATIO_MAX
     );
-    const fullGlowAt = maxImages > 1
-      ? Math.max(startCount + 1, Math.round(maxImages * ratio))
-      : null;
+    const fullGlowAt =
+      maxImages > 1 ? Math.max(startCount + 1, Math.round(maxImages * ratio)) : null;
 
     for (const item of preparedEntries) {
       const highlight =
-        highlightEnabled &&
-        maxImages >= startCount &&
-        item.imageCount >= startCount;
+        highlightEnabled && maxImages >= startCount && item.imageCount >= startCount;
 
       const strength = (() => {
         if (!highlight || !maxImages || !fullGlowAt || fullGlowAt <= startCount) {
@@ -1257,9 +1262,7 @@ class HistoryDialog {
   _renderEntry(entry, sourcesArg = null, usageMeta = {}) {
     const article = createEl("article", "phg-entry-card");
 
-    const sources = Array.isArray(sourcesArg)
-      ? sourcesArg
-      : buildImageSources(entry, this.api);
+    const sources = Array.isArray(sourcesArg) ? sourcesArg : buildImageSources(entry, this.api);
     const hasImages = sources.length > 0;
     const preview = hasImages ? sources[sources.length - 1] : null; // latest
 
@@ -1333,7 +1336,8 @@ class HistoryDialog {
       return;
     }
 
-    const widget = node.widgets?.find((item) => item?.name === target.widgetName) ?? resolvePromptWidget(node);
+    const widget =
+      node.widgets?.find((item) => item?.name === target.widgetName) ?? resolvePromptWidget(node);
     if (!widget) {
       await this._copyPrompt(entry);
       this._setMessage(TEXT.copiedMissingWidget, "warn");

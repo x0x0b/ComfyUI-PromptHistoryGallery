@@ -111,16 +111,12 @@ class _HistoryWatcher:
                             server,
                         )
                     except Exception:
-                        LOGGER.exception(
-                            "Failed to process prompt history entry %s", prompt_id
-                        )
+                        LOGGER.exception("Failed to process prompt history entry %s", prompt_id)
                     processed_prompt_ids.add(prompt_id)
 
                 processed_prompt_ids.intersection_update(window_ids)
             except Exception:
-                LOGGER.exception(
-                    "Prompt history watcher encountered an error; retrying shortly."
-                )
+                LOGGER.exception("Prompt history watcher encountered an error; retrying shortly.")
                 queue = None
 
             self._stop_event.wait(self.poll_interval)

@@ -195,7 +195,7 @@
   border-radius: 50%;
   background: var(--p-primary-color, #38bdf8);
   margin-top: -7px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
   transition: transform 0.1s ease;
   position: relative; /* Ensure z-index works if needed */
   z-index: 2;
@@ -245,7 +245,7 @@
   bottom: 0;
   background-color: rgba(255, 255, 255, 0.15);
   border-radius: 24px;
-  transition: .3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .phg-toggle-slider:before {
@@ -257,7 +257,7 @@
   bottom: 2px;
   background-color: white;
   border-radius: 50%;
-  transition: .3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
 }
 
@@ -276,7 +276,6 @@
   justify-content: center;
   flex-shrink: 0;
 }
-
 
 .phg-entry {
   border-radius: 0.75rem;
@@ -434,7 +433,9 @@
   min-height: 96px;
   font: inherit;
   color: inherit;
-  transition: transform 0.15s ease, border-color 0.15s ease;
+  transition:
+    transform 0.15s ease,
+    border-color 0.15s ease;
 }
 
 .phg-preview-image img {
@@ -504,7 +505,8 @@
   align-items: center;
   justify-content: center;
   padding: 1.5rem;
-  background: radial-gradient(circle at 20% 20%, rgba(56, 189, 248, 0.08), transparent 35%),
+  background:
+    radial-gradient(circle at 20% 20%, rgba(56, 189, 248, 0.08), transparent 35%),
     radial-gradient(circle at 80% 10%, rgba(94, 234, 212, 0.08), transparent 35%),
     rgba(6, 8, 18, 0.8);
   backdrop-filter: blur(2px);
@@ -664,16 +666,19 @@
   --phg-usage-strength: var(--phg-usage-strength, 0.5);
   --phg-usage-floor: 0.08;
   border-color: rgba(56, 189, 248, calc(var(--phg-usage-floor) + 0.42 * var(--phg-usage-strength)));
-  background: linear-gradient(
+  background:
+    linear-gradient(
       135deg,
       rgba(125, 211, 252, calc(var(--phg-usage-floor) * 0.7 + 0.24 * var(--phg-usage-strength))),
-      rgba(45, 212, 191, calc(var(--phg-usage-floor) * 0.6 + 0.20 * var(--phg-usage-strength))),
+      rgba(45, 212, 191, calc(var(--phg-usage-floor) * 0.6 + 0.2 * var(--phg-usage-strength))),
       rgba(255, 255, 255, 0.014)
     ),
     rgba(255, 255, 255, 0.02);
   box-shadow:
-    0 12px 30px rgba(56, 189, 248, calc(var(--phg-usage-floor) * 0.9 + 0.18 * var(--phg-usage-strength))),
-    inset 0 0 0 1px rgba(56, 189, 248, calc(var(--phg-usage-floor) + 0.22 * var(--phg-usage-strength)));
+    0 12px 30px
+      rgba(56, 189, 248, calc(var(--phg-usage-floor) * 0.9 + 0.18 * var(--phg-usage-strength))),
+    inset 0 0 0 1px
+      rgba(56, 189, 248, calc(var(--phg-usage-floor) + 0.22 * var(--phg-usage-strength)));
 }
 
 .phg-entry-card__header {
@@ -725,7 +730,9 @@
   height: 100%;
   object-fit: cover;
   cursor: pointer;
-  transition: transform 0.15s ease, filter 0.2s ease;
+  transition:
+    transform 0.15s ease,
+    filter 0.2s ease;
 }
 
 .phg-entry-card__preview img:hover {
@@ -739,7 +746,17 @@
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.06);
-  font-family: var(--p-font-family, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace);
+  font-family: var(
+    --p-font-family,
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    "Liberation Mono",
+    "Courier New",
+    monospace
+  );
   font-size: 0.9rem;
   line-height: 1.45;
   color: inherit;
@@ -766,7 +783,10 @@
   padding: 0.35rem 0.9rem;
   font-size: 0.9rem;
   cursor: pointer;
-  transition: transform 0.12s ease, border-color 0.12s ease, background 0.15s ease;
+  transition:
+    transform 0.12s ease,
+    border-color 0.12s ease,
+    background 0.15s ease;
 }
 
 .phg-button:hover {
@@ -826,12 +846,16 @@
     rgba(45, 212, 191, calc(var(--phg-usage-floor) + 0.19 * var(--phg-usage-strength)))
   );
   border-color: rgba(56, 189, 248, calc(var(--phg-usage-floor) + 0.25 * var(--phg-usage-strength)));
-  box-shadow: 0 6px 18px rgba(56, 189, 248, calc(var(--phg-usage-floor) * 0.85 + 0.16 * var(--phg-usage-strength)));
+  box-shadow: 0 6px 18px
+    rgba(56, 189, 248, calc(var(--phg-usage-floor) * 0.85 + 0.16 * var(--phg-usage-strength)));
 }
 
 .phg-chip--clickable {
   cursor: pointer;
-  transition: transform 0.1s ease, border-color 0.12s ease, background 0.12s ease;
+  transition:
+    transform 0.1s ease,
+    border-color 0.12s ease,
+    background 0.12s ease;
 }
 
 .phg-chip--clickable:hover,

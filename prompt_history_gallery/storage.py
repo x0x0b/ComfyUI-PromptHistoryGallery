@@ -1,6 +1,7 @@
 """
 Helpers for persisting prompt history entries using SQLite.
 """
+
 from __future__ import annotations
 
 import json
@@ -112,9 +113,7 @@ def _normalize_output_payload(file_info: Any) -> Optional[OutputRecord]:
         if not filename:
             return None
         subfolder = str(file_info.get("subfolder", "") or "").strip()
-        output_type = str(
-            file_info.get("type") or file_info.get("kind") or ""
-        ).strip()
+        output_type = str(file_info.get("type") or file_info.get("kind") or "").strip()
         return OutputRecord(
             filename=filename,
             subfolder=subfolder,
@@ -124,9 +123,7 @@ def _normalize_output_payload(file_info: Any) -> Optional[OutputRecord]:
     return None
 
 
-def _format_output_record(
-    filename: str, subfolder: str, output_type: str
-) -> OutputRecord:
+def _format_output_record(filename: str, subfolder: str, output_type: str) -> OutputRecord:
     return OutputRecord(filename=filename, subfolder=subfolder, type=output_type)
 
 
@@ -173,10 +170,7 @@ class PromptHistoryStorage:
         tags = json.loads(row["tags"]) if row["tags"] else []
         metadata = json.loads(row["metadata"]) if row["metadata"] else {}
         normalized_files: Tuple[Dict[str, Any], ...] = tuple(
-            item.to_dict()
-            if isinstance(item, OutputRecord)
-            else dict(item)
-            for item in files
+            item.to_dict() if isinstance(item, OutputRecord) else dict(item) for item in files
         )
         return PromptHistoryEntry(
             id=row["id"],
@@ -298,14 +292,10 @@ class PromptHistoryStorage:
         incoming_tags = _normalize_tags(tags)
         incoming_metadata = _normalize_metadata(metadata)
         with self._locked_cursor(commit=True) as cursor:
-            existing = self._find_entry_locked(
-                cursor, prompt, incoming_tags, incoming_metadata
-            )
+            existing = self._find_entry_locked(cursor, prompt, incoming_tags, incoming_metadata)
             if existing is not None:
                 return existing, False
-            entry = self._create_entry_locked(
-                cursor, prompt, incoming_tags, incoming_metadata
-            )
+            entry = self._create_entry_locked(cursor, prompt, incoming_tags, incoming_metadata)
             return entry, True
 
     def list(self, limit: Optional[int] = None) -> List[PromptHistoryEntry]:
@@ -324,9 +314,7 @@ class PromptHistoryStorage:
         with self._locked_cursor() as cursor:
             rows = cursor.execute(sql, params).fetchall()
             entry_ids = [row["id"] for row in rows]
-            outputs_map = (
-                self._fetch_outputs(cursor, entry_ids) if entry_ids else {}
-            )
+            outputs_map = self._fetch_outputs(cursor, entry_ids) if entry_ids else {}
         entries: List[PromptHistoryEntry] = []
         for row in rows:
             files = tuple(outputs_map.get(row["id"], []))
@@ -474,13 +462,10 @@ class PromptHistoryStorage:
                 """
             )
             existing_columns = {
-                row["name"]
-                for row in cursor.execute("PRAGMA table_info(prompt_history)")
+                row["name"] for row in cursor.execute("PRAGMA table_info(prompt_history)")
             }
             if "last_used_at" not in existing_columns:
-                cursor.execute(
-                    "ALTER TABLE prompt_history ADD COLUMN last_used_at TEXT"
-                )
+                cursor.execute("ALTER TABLE prompt_history ADD COLUMN last_used_at TEXT")
                 cursor.execute(
                     """
                     UPDATE prompt_history

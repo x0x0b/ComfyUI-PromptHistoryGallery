@@ -15,12 +15,7 @@ function ensureElement(id) {
 }
 
 export class ViewerBridge {
-  constructor({
-    cssUrl,
-    scriptUrl,
-    assetLoader = createAssetLoader(),
-    rootId = DEFAULT_ROOT_ID,
-  }) {
+  constructor({ cssUrl, scriptUrl, assetLoader = createAssetLoader(), rootId = DEFAULT_ROOT_ID }) {
     this.assetLoader = assetLoader;
     this.cssUrl = cssUrl;
     this.scriptUrl = scriptUrl;
@@ -127,10 +122,7 @@ export class ViewerBridge {
       url(image) {
         return image?.getAttribute?.("data-original") || image?.src || "";
       },
-      title: [
-        1,
-        (image) => image?.getAttribute?.("data-caption") || image?.alt || "",
-      ],
+      title: [1, (image) => image?.getAttribute?.("data-caption") || image?.alt || ""],
     });
 
     const hiddenHandler = () => this._teardown(true);

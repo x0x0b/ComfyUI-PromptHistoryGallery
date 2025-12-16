@@ -1,6 +1,7 @@
 """
 Prompt input node that records text prompts into history storage.
 """
+
 from __future__ import annotations
 
 import time
@@ -44,11 +45,7 @@ def _ensure_metadata(raw: Any) -> Dict[str, Any]:
     if isinstance(raw, (list, tuple)):
         result: Dict[str, Any] = {}
         for item in raw:
-            if (
-                isinstance(item, (list, tuple))
-                and len(item) == 2
-                and isinstance(item[0], str)
-            ):
+            if isinstance(item, (list, tuple)) and len(item) == 2 and isinstance(item[0], str):
                 result[item[0]] = item[1]
         if result:
             return result
@@ -108,8 +105,7 @@ class PromptHistoryInput:
                     },
                 ),
             },
-            "optional": {
-            },
+            "optional": {},
         }
 
     RETURN_TYPES = ("CONDITIONING",)

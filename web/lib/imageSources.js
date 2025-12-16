@@ -59,10 +59,7 @@ function normalizeDescriptor(candidate, { allowMissingExtension = false } = {}) 
     record.subfolder = String(candidate.subfolder);
   }
 
-  const type =
-    candidate.type ??
-    candidate.kind ??
-    (candidate.metadata && candidate.metadata.type);
+  const type = candidate.type ?? candidate.kind ?? (candidate.metadata && candidate.metadata.type);
   if (type) {
     record.type = String(type);
   }
@@ -71,17 +68,9 @@ function normalizeDescriptor(candidate, { allowMissingExtension = false } = {}) 
     record.preview = candidate.preview;
   }
 
-  if (
-    candidate.thumbnail ??
-    candidate.thumb ??
-    candidate.preview_url ??
-    candidate.url
-  ) {
+  if (candidate.thumbnail ?? candidate.thumb ?? candidate.preview_url ?? candidate.url) {
     record.thumbnail =
-      candidate.thumbnail ??
-      candidate.thumb ??
-      candidate.preview_url ??
-      candidate.url;
+      candidate.thumbnail ?? candidate.thumb ?? candidate.preview_url ?? candidate.url;
   }
 
   if (
@@ -92,22 +81,13 @@ function normalizeDescriptor(candidate, { allowMissingExtension = false } = {}) 
     candidate.name
   ) {
     record.title =
-      candidate.title ??
-      candidate.label ??
-      candidate.caption ??
-      candidate.prompt ??
-      candidate.name;
+      candidate.title ?? candidate.label ?? candidate.caption ?? candidate.prompt ?? candidate.name;
   }
 
   return record;
 }
 
-function appendFromCollection(
-  result,
-  seen,
-  collection,
-  { allowMissingExtension = false } = {}
-) {
+function appendFromCollection(result, seen, collection, { allowMissingExtension = false } = {}) {
   if (!Array.isArray(collection)) return;
   for (const item of collection) {
     const descriptor = normalizeDescriptor(item, {

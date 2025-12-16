@@ -83,7 +83,9 @@ def _resolve_entry_ids(
     return list(resolved.values())
 
 
-def _notify_clients(server: Optional[Any], entry_ids: List[str], files: List[Dict[str, Any]]) -> None:
+def _notify_clients(
+    server: Optional[Any], entry_ids: List[str], files: List[Dict[str, Any]]
+) -> None:
     if server is None or not entry_ids:
         return
     try:
