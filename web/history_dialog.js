@@ -36,33 +36,32 @@ const TEXT = {
   deleteSuccess: "History entry deleted.",
   deleteError: "Failed to delete entry.",
   settingsTitle: "Settings",
-  settingsHint: "Quick pop-up shown after images are generated.",
-  settingsToggle: "Enable pop-up",
-  settingsDuration: "Pop-up duration",
-  settingsSize: "Pop-up size",
-  settingsLandscapeSize: "Landscape width (% viewport)",
-  settingsPortraitSize: "Portrait height (% viewport)",
-  settingsSizeHint: "Landscape & square use width; portrait uses height.",
-  settingsReset: "Reset defaults",
+  settingsHint: "Configure extension behavior.",
+  settingsReset: "Reset to defaults",
   settingsClose: "Close",
-  historyLimitLabel: "History items to load",
-  historyLimitHint: "Higher values show more prompts but may load a little slower.",
+  tabHistory: "History",
+  tabSettings: "Settings",
+  sectionGeneral: "General",
+  sectionUsage: "List Appearance",
+  sectionPreview: "Popup Preview",
+  historyLimitLabel: "History Limit",
+  historyLimitHint: "Number of prompts to keep in history.",
   searchPlaceholder: "Search prompts or tags…",
-  searchClear: "Clear search",
+  searchClear: "Clear",
   searchNoResults: "No prompts match your search.",
-  usageSettingsTitle: "Prompt List",
-  usageSettingsHint: "Controls how prompts in the list stand out.",
-  usageSettingsToggle: "Highlight frequent prompts",
-  usageSettingsRatio: "Highlight when ≥ % of top images",
-  usageSettingsStart: "Start highlight at images ≥",
-  usageSettingsStartHint: "Highlight begins once a prompt has at least this many images.",
-  usageSettingsRatioHint: "Lower = more prompts glow. Higher = only top prompts glow brightly.",
+  usageSettingsHighlight: "Highlight Frequent Prompts",
+  usageSettingsRatio: "Highlight Threshold (% of max)",
+  usageSettingsStart: "Minimum Images to Highlight",
+  previewToggle: "Enable Popup Preview",
+  previewDuration: "Popup Duration",
+  previewSizeLandscape: "Landscape Size (% width)",
+  previewSizePortrait: "Portrait Size (% height)",
 };
 
 const USAGE_RATIO_MIN = 0.05;
 const USAGE_RATIO_MAX = 1;
 const USAGE_START_MIN = 1;
-const USAGE_START_MAX = 500;
+const USAGE_START_MAX = 100;
 
 const PREVIEW_MIN_MS = 1000;
 const PREVIEW_MAX_MS = 15000;
@@ -278,7 +277,7 @@ class HistoryDialog {
       error: "",
       entries: [],
       target: null,
-      settingsOpen: false,
+      activeTab: "history",
       searchQuery: "",
     };
 
@@ -286,6 +285,7 @@ class HistoryDialog {
     this._buildLayout();
     this._updateTargetLabel();
     this._syncSettingsUI();
+    this._switchTab("history"); // Default tab
   }
 
   openWithNode(node) {
@@ -308,7 +308,6 @@ class HistoryDialog {
     if (!this.state.isOpen) return;
     this.state.isOpen = false;
     this.backdrop.classList.add("phg-hidden");
-    this._toggleSettings(false);
     this.viewer.close();
   }
 
@@ -350,16 +349,23 @@ class HistoryDialog {
     );
   }
 
-  _toggleSettings(forceValue) {
-    const next =
-      typeof forceValue === "boolean" ? forceValue : !this.state.settingsOpen;
-    this.state.settingsOpen = next;
-    if (this.settingsPanel) {
-      this.settingsPanel.classList.toggle("phg-hidden", !next);
-    }
-    if (this.settingsBtn) {
-      this.settingsBtn.textContent = next ? TEXT.settingsClose : "Settings";
-      this.settingsBtn.dataset.active = next ? "true" : "false";
+  _switchTab(tabId) {
+    this.state.activeTab = tabId;
+
+    // Update Tab Buttons
+    [this.historyTabBtn, this.settingsTabBtn].forEach(btn => {
+      if (btn) btn.dataset.active = btn.dataset.tab === tabId ? "true" : "false";
+    });
+
+    // Update Views
+    if (this.historyView && this.settingsView) {
+      if (tabId === "history") {
+        this.historyView.classList.remove("phg-hidden");
+        this.settingsView.classList.add("phg-hidden");
+      } else {
+        this.historyView.classList.add("phg-hidden");
+        this.settingsView.classList.remove("phg-hidden");
+      }
     }
   }
 
@@ -374,129 +380,6 @@ class HistoryDialog {
     return `${seconds.toFixed(precision)}s`;
   }
 
-  _syncSettingsUI() {
-    const state =
-      this.settingsStore?.getState?.() ??
-      this.settingsState ??
-      DEFAULT_SETTINGS;
-    this.settingsState = state;
-    const enabled = state.enabled !== false;
-
-    if (this.historyLimitRange) {
-      const limit = this._getHistoryLimit();
-      this.historyLimitRange.value = String(limit);
-      if (this.historyLimitValue) {
-        this.historyLimitValue.textContent = `${limit} items`;
-      }
-    }
-
-    if (this.highlightToggleInput) {
-      this.highlightToggleInput.checked = state.highlightUsage !== false;
-    }
-
-    if (this.highlightStartInput) {
-      const start = clamp(
-        Number(state.highlightUsageStartCount ?? DEFAULT_SETTINGS.highlightUsageStartCount),
-        USAGE_START_MIN,
-        USAGE_START_MAX
-      );
-      this.highlightStartInput.value = String(start);
-      if (this.highlightStartValue) {
-        this.highlightStartValue.textContent = `${start} images`;
-      }
-      const disabled = state.highlightUsage === false;
-      this.highlightStartInput.disabled = disabled;
-      if (this.highlightStartField) {
-        this.highlightStartField.classList.toggle("phg-settings-field--disabled", disabled);
-      }
-    }
-
-    if (this.highlightRatioInput) {
-      const ratioValue = clamp(
-        Number(state.highlightUsageRatio ?? DEFAULT_SETTINGS.highlightUsageRatio),
-        USAGE_RATIO_MIN,
-        USAGE_RATIO_MAX
-      );
-      const percent = Math.round(ratioValue * 100);
-      this.highlightRatioInput.value = String(percent);
-      if (this.highlightRatioValue) {
-        this.highlightRatioValue.textContent = `${percent}% of top image count`;
-      }
-      this.highlightRatioInput.disabled = state.highlightUsage === false;
-      if (this.highlightRatioField) {
-        this.highlightRatioField.classList.toggle("phg-settings-field--disabled", state.highlightUsage === false);
-      }
-    }
-
-    if (this.previewToggleInput) {
-      this.previewToggleInput.checked = enabled;
-    }
-
-    if (this.durationInput) {
-      const duration = clamp(
-        Number(state.displayDuration ?? DEFAULT_SETTINGS.displayDuration),
-        PREVIEW_MIN_MS,
-        PREVIEW_MAX_MS
-      );
-      this.durationInput.value = String(duration);
-      if (this.durationValue) {
-        this.durationValue.textContent = `${this._formatDuration(
-          duration
-        )} (${Math.round(duration)} ms)`;
-      }
-      this.durationInput.disabled = !enabled;
-      if (this.durationField) {
-        this.durationField.classList.toggle(
-          "phg-settings-field--disabled",
-          !enabled
-        );
-      }
-    }
-
-    if (this.landscapeInput) {
-      const value = clamp(
-        Number(
-          state.landscapeViewportPercent ?? DEFAULT_SETTINGS.landscapeViewportPercent
-        ),
-        PREVIEW_MIN_PERCENT,
-        PREVIEW_MAX_PERCENT
-      );
-      this.landscapeInput.value = String(value);
-      if (this.landscapeValue) {
-        this.landscapeValue.textContent = `${value}% of viewport width`;
-      }
-      this.landscapeInput.disabled = !enabled;
-      if (this.landscapeField) {
-        this.landscapeField.classList.toggle("phg-settings-field--disabled", !enabled);
-      }
-    }
-
-    if (this.portraitInput) {
-      const value = clamp(
-        Number(
-          state.portraitViewportPercent ?? DEFAULT_SETTINGS.portraitViewportPercent
-        ),
-        PREVIEW_MIN_PERCENT,
-        PREVIEW_MAX_PERCENT
-      );
-      this.portraitInput.value = String(value);
-      if (this.portraitValue) {
-        this.portraitValue.textContent = `${value}% of viewport height`;
-      }
-      this.portraitInput.disabled = !enabled;
-      if (this.portraitField) {
-        this.portraitField.classList.toggle("phg-settings-field--disabled", !enabled);
-      }
-    }
-  }
-
-  _applySettingsPatch(patch) {
-    if (!this.settingsStore?.update) return;
-    this.settingsStore.update(patch);
-    this.settingsState = this.settingsStore.getState?.() ?? this.settingsState;
-    this._syncSettingsUI();
-  }
-
   _resetSettings() {
     if (!this.settingsStore?.reset) return;
     this.settingsStore.reset();
@@ -504,92 +387,299 @@ class HistoryDialog {
     this._syncSettingsUI();
   }
 
-  _buildSettingsPanel() {
-    const panel = createEl("section", "phg-settings phg-hidden");
-    panel.setAttribute("aria-label", TEXT.settingsTitle);
+  _buildSettingsView() {
+    const container = createEl("div", "phg-settings-container phg-hidden");
 
-    const header = createEl("div", "phg-settings-header");
-    const title = createEl("div", "phg-settings-title", TEXT.settingsTitle);
-    const actions = createEl("div", "phg-settings-actions");
-    const resetBtn = this._createButton(
-      TEXT.settingsReset,
-      "Restore preview defaults",
-      () => this._resetSettings(),
-      "ghost"
-    );
-    const closeBtn = this._createButton(
-      TEXT.settingsClose,
-      "Hide preview settings",
-      () => this._toggleSettings(false),
-      "ghost"
-    );
-    actions.append(resetBtn, closeBtn);
-    header.append(title, actions);
-
-    const grid = createEl("div", "phg-settings-grid");
-
-    const promptListCard = this._buildSettingsCard(
-      TEXT.usageSettingsTitle,
-      TEXT.usageSettingsHint,
-      [
+    // -- List Appearance --
+    const listGroup = this._buildSettingsGroup(TEXT.sectionUsage, [
         this._buildHistoryLimitField(),
-        this._buildUsageHighlightField(),
-        this._buildUsageStartField(),
-        this._buildUsageThresholdField(),
-      ]
-    );
-
-    const popupCard = this._buildSettingsCard("Popup Preview", TEXT.settingsHint, [
-      this._buildPreviewToggleField(),
-      this._buildDurationField(),
-      this._buildLandscapeSizeField(),
-      this._buildPortraitSizeField(),
+        this._buildToggleField(
+          TEXT.usageSettingsHighlight,
+          () => this.settingsState?.highlightUsage !== false,
+          (checked) => this._applySettingsPatch({ highlightUsage: checked }),
+          "highlightToggleInput"
+        ),
+        this._buildNumberField(
+          TEXT.usageSettingsStart,
+          () => this.settingsState?.highlightUsageStartCount ?? DEFAULT_SETTINGS.highlightUsageStartCount,
+          (val) => this._applySettingsPatch({ highlightUsageStartCount: val }),
+          USAGE_START_MIN, USAGE_START_MAX, 1,
+          (v) => `${v} images`,
+          "highlightStartInput"
+        ),
+        this._buildNumberField(
+          TEXT.usageSettingsRatio,
+          () => Math.round((this.settingsState?.highlightUsageRatio ?? DEFAULT_SETTINGS.highlightUsageRatio) * 100),
+          (val) => this._applySettingsPatch({ highlightUsageRatio: val / 100 }),
+          Math.round(USAGE_RATIO_MIN * 100), 100, 5,
+          (v) => `${v}%`,
+          "highlightRatioInput"
+        ),
     ]);
 
-    grid.append(promptListCard, popupCard);
+    // -- Preview Popup --
+    const previewContainer = createEl("div", "phg-settings-group");
 
-    panel.append(header, grid);
-    return panel;
-  }
+    // Header with Toggle
+    const previewHeader = createEl("div", "phg-settings-group__header phg-settings-group__header--row");
 
-  _buildSettingsCard(title, description, fields = []) {
-    const card = createEl("div", "phg-settings-card");
-    const heading = createEl("div", "phg-settings-card__title", title);
-    const desc = createEl("div", "phg-settings-card__desc", description);
-    const body = createEl("div", "phg-settings-card__fields");
-    fields.forEach((field) => body.append(field));
-    card.append(heading, desc, body);
-    return card;
-  }
+    const previewTitle = createEl("div", "phg-settings-group__title", TEXT.sectionPreview);
 
-  _buildHistoryLimitField() {
-    const field = createEl("div", "phg-settings-field");
-    const label = createEl("div", "phg-settings-label", TEXT.historyLimitLabel);
-    const hint = createEl("div", "phg-settings-hint", TEXT.historyLimitHint);
-    const value = createEl(
-      "div",
-      "phg-settings-value",
-      `${this._getHistoryLimit()} items`
+    // Wrapper for the toggle to sit in the header
+    const toggleControl = createEl("div", "phg-settings-control");
+    const toggleLabel = createEl("label", "phg-toggle");
+    const toggleInput = document.createElement("input");
+    toggleInput.type = "checkbox";
+    toggleInput.checked = this.settingsState?.enabled !== false;
+
+    const toggleSlider = createEl("span", "phg-toggle-slider");
+    toggleLabel.append(toggleInput, toggleSlider);
+    toggleControl.append(toggleLabel);
+
+    previewHeader.append(previewTitle, toggleControl);
+
+    // Collapsible Content
+    const previewContent = createEl("div", "phg-settings-group__content");
+    if (!toggleInput.checked) {
+        previewContent.style.display = "none";
+    }
+
+    // Toggle Logic
+    toggleInput.addEventListener("change", () => {
+        const checked = toggleInput.checked;
+        this._applySettingsPatch({ enabled: checked });
+        previewContent.style.display = checked ? "block" : "none";
+    });
+    this.previewToggleInput = toggleInput; // Bind for sync
+
+    // Add items to content
+    previewContent.append(
+        this._buildNumberField(
+            TEXT.previewDuration,
+            () => this.settingsState?.displayDuration ?? DEFAULT_SETTINGS.displayDuration,
+            (val) => this._applySettingsPatch({ displayDuration: val }),
+            PREVIEW_MIN_MS, PREVIEW_MAX_MS, PREVIEW_STEP_MS,
+            (v) => this._formatDuration(v),
+            "durationInput"
+        ),
+        this._buildNumberField(
+          TEXT.previewSizeLandscape,
+          () => this.settingsState?.landscapeViewportPercent ?? DEFAULT_SETTINGS.landscapeViewportPercent,
+          (val) => this._applySettingsPatch({ landscapeViewportPercent: val }),
+          PREVIEW_MIN_PERCENT, PREVIEW_MAX_PERCENT, 1,
+          (v) => `${v}%`,
+          "landscapeInput"
+        ),
+        this._buildNumberField(
+          TEXT.previewSizePortrait,
+          () => this.settingsState?.portraitViewportPercent ?? DEFAULT_SETTINGS.portraitViewportPercent,
+          (val) => this._applySettingsPatch({ portraitViewportPercent: val }),
+          PREVIEW_MIN_PERCENT, PREVIEW_MAX_PERCENT, 1,
+          (v) => `${v}%`,
+          "portraitInput"
+        )
     );
 
+    previewContainer.append(previewHeader, previewContent);
+    const previewGroup = previewContainer;
+
+    const footer = createEl("div", "phg-settings-footer");
+    const resetBtn = this._createButton(
+        TEXT.settingsReset,
+        "Restore defaults",
+        () => this._resetSettings(),
+        "ghost"
+    );
+    footer.append(resetBtn);
+
+    container.append(listGroup, previewGroup, footer);
+    return container;
+  }
+
+  _buildSettingsGroup(title, items) {
+      const group = createEl("div", "phg-settings-group");
+      const header = createEl("div", "phg-settings-group__header");
+      const titleEl = createEl("div", "phg-settings-group__title", title);
+      header.append(titleEl);
+      group.append(header, ...items);
+      return group;
+  }
+
+  _buildToggleField(label, getValue, onChange, refName) {
+      const item = createEl("div", "phg-settings-item");
+      const info = createEl("div", "phg-settings-item__info");
+      info.append(createEl("div", "phg-settings-item__label", label));
+
+      const control = createEl("div", "phg-settings-control");
+      const toggle = createEl("label", "phg-toggle");
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.checked = getValue();
+      input.addEventListener("change", () => onChange(input.checked));
+
+      const slider = createEl("span", "phg-toggle-slider");
+      toggle.append(input, slider);
+      control.append(toggle);
+
+      item.append(info, control);
+
+      if (refName) this[refName] = input;
+      return item;
+  }
+
+  _buildNumberField(label, getValue, onChange, min, max, step, formatDisplay, refName) {
+      const item = createEl("div", "phg-settings-item phg-settings-item--col");
+
+      const headerObj = createEl("div", "phg-settings-item__header");
+
+      const labelEl = createEl("div", "phg-settings-item__label", label);
+      const valueEl = createEl("div", "phg-range-value");
+      const currentVal = getValue();
+      valueEl.textContent = formatDisplay(currentVal);
+
+      headerObj.append(labelEl, valueEl);
+
+      const control = createEl("div", "phg-range-wrapper");
+      const range = document.createElement("input");
+      range.type = "range";
+      range.className = "phg-range";
+      range.min = String(min);
+      range.max = String(max);
+      range.step = String(step);
+      range.value = String(currentVal);
+
+      range.addEventListener("input", () => {
+         const val = Number(range.value);
+         valueEl.textContent = formatDisplay(val);
+      });
+      range.addEventListener("change", () => {
+         onChange(Number(range.value));
+      });
+
+      control.append(range);
+      item.append(headerObj, control);
+
+      if (refName) this[refName] = range;
+      // We can also store the value label to update it if state changes externally
+      if (refName) this[refName + "Display"] = valueEl;
+
+      return item;
+  }
+  _buildHistoryLimitField() {
+    const getValue = () => this._getHistoryLimit();
+    const item = createEl("div", "phg-settings-item phg-settings-item--col");
+
+    const headerObj = createEl("div", "phg-settings-item__header");
+    headerObj.append(
+      createEl("div", "phg-settings-item__label", TEXT.historyLimitLabel),
+      createEl("div", "phg-range-value", `${getValue()} items`)
+    );
+    this.historyLimitValue = headerObj.lastChild;
+
+    const control = createEl("div", "phg-range-wrapper");
     const range = document.createElement("input");
     range.type = "range";
+    range.className = "phg-range";
     range.min = String(HISTORY_LIMIT_MIN);
     range.max = String(HISTORY_LIMIT_MAX);
     range.step = "10";
-    range.value = String(this._getHistoryLimit());
+    range.value = String(getValue());
+
     range.addEventListener("input", () => {
-      value.textContent = `${range.value} items`;
+       this.historyLimitValue.textContent = `${range.value} items`;
     });
     range.addEventListener("change", () => {
-      const next = clamp(Number(range.value) || DEFAULT_SETTINGS.historyLimit, HISTORY_LIMIT_MIN, HISTORY_LIMIT_MAX);
-      this._applySettingsPatch({ historyLimit: next });
+       const next = clamp(Number(range.value) || DEFAULT_SETTINGS.historyLimit, HISTORY_LIMIT_MIN, HISTORY_LIMIT_MAX);
+       this._applySettingsPatch({ historyLimit: next });
     });
 
-    field.append(label, range, value, hint);
+    control.append(range);
+    item.append(headerObj, control);
     this.historyLimitRange = range;
-    this.historyLimitValue = value;
-    return field;
+    return item;
+  }
+
+  _syncSettingsUI() {
+    const state = this.settingsStore?.getState?.() ?? this.settingsState ?? DEFAULT_SETTINGS;
+    this.settingsState = state;
+
+    // History Limit
+    if (this.historyLimitRange) {
+        const limit = this._getHistoryLimit();
+        this.historyLimitRange.value = String(limit);
+        if (this.historyLimitValue) this.historyLimitValue.textContent = `${limit} items`;
+    }
+
+    // Toggle: Highlight Usage
+    if (this.highlightToggleInput) {
+        this.highlightToggleInput.checked = state.highlightUsage !== false;
+    }
+
+    // Number: Highlight Start
+    if (this.highlightStartInput) {
+         const start = clamp(
+            Number(state.highlightUsageStartCount ?? DEFAULT_SETTINGS.highlightUsageStartCount),
+            USAGE_START_MIN, USAGE_START_MAX
+         );
+         this.highlightStartInput.value = String(start);
+         if (this.highlightStartInputDisplay) {
+            this.highlightStartInputDisplay.textContent = `${start} images`;
+         }
+         this.highlightStartInput.disabled = state.highlightUsage === false;
+    }
+
+    // Number: Ratio
+    if (this.highlightRatioInput) {
+        const ratioValue = clamp(
+            Number(state.highlightUsageRatio ?? DEFAULT_SETTINGS.highlightUsageRatio),
+            USAGE_RATIO_MIN, USAGE_RATIO_MAX
+        );
+        const percent = Math.round(ratioValue * 100);
+        this.highlightRatioInput.value = String(percent);
+        if (this.highlightRatioInputDisplay) {
+            this.highlightRatioInputDisplay.textContent = `${percent}%`;
+        }
+        this.highlightRatioInput.disabled = state.highlightUsage === false;
+    }
+
+    // Toggle: Preview
+    if (this.previewToggleInput) {
+        const isEnabled = state.enabled !== false;
+        this.previewToggleInput.checked = isEnabled;
+        // Update content visibility
+        const toggleLabel = this.previewToggleInput.closest('.phg-settings-control');
+        const header = toggleLabel?.parentNode;
+        const content = header?.nextElementSibling;
+        if (content && content.classList.contains('phg-settings-group__content')) {
+            content.style.display = isEnabled ? 'block' : 'none';
+        }
+    }
+
+    // Number: Duration
+    if (this.durationInput) {
+        const val = clamp(
+            Number(state.displayDuration ?? DEFAULT_SETTINGS.displayDuration),
+            PREVIEW_MIN_MS, PREVIEW_MAX_MS
+        );
+        this.durationInput.value = String(val);
+        if (this.durationInputDisplay) {
+            this.durationInputDisplay.textContent = this._formatDuration(val);
+        }
+    }
+
+    // Number: Landscape
+    if (this.landscapeInput) {
+        const val = clamp(Number(state.landscapeViewportPercent ?? DEFAULT_SETTINGS.landscapeViewportPercent), PREVIEW_MIN_PERCENT, PREVIEW_MAX_PERCENT);
+        this.landscapeInput.value = String(val);
+        if (this.landscapeInputDisplay) this.landscapeInputDisplay.textContent = `${val}%`;
+    }
+
+     // Number: Portrait
+    if (this.portraitInput) {
+        const val = clamp(Number(state.portraitViewportPercent ?? DEFAULT_SETTINGS.portraitViewportPercent), PREVIEW_MIN_PERCENT, PREVIEW_MAX_PERCENT);
+        this.portraitInput.value = String(val);
+        if (this.portraitInputDisplay) this.portraitInputDisplay.textContent = `${val}%`;
+    }
   }
 
   _buildPreviewToggleField() {
@@ -813,22 +903,54 @@ class HistoryDialog {
     this.targetLabel = createEl("div", "phg-dialog__subtitle");
     titleBlock.append(this.titleEl, this.targetLabel);
 
-    const actions = createEl("div", "phg-dialog__actions");
-    this.refreshBtn = this._createButton("Refresh", "Reload history", () => this.refresh());
-    this.settingsBtn = this._createButton("Settings", "History & preview settings", () => this._toggleSettings());
-    this.closeBtn = this._createButton("Close", "Close history", () => this.close(), "ghost");
-    actions.append(this.refreshBtn, this.settingsBtn, this.closeBtn);
+    // --- Tabs in Header ---
+    const tabs = createEl("div", "phg-tabs");
 
-    header.append(titleBlock, actions);
+    // History Tab Button
+    const historyBtn = document.createElement("button");
+    historyBtn.className = "phg-tab-button";
+    historyBtn.textContent = TEXT.tabHistory;
+    historyBtn.dataset.tab = "history";
+    historyBtn.addEventListener("click", () => this._switchTab("history"));
+    this.historyTabBtn = historyBtn;
+
+    // Settings Tab Button
+    const settingsBtn = document.createElement("button");
+    settingsBtn.className = "phg-tab-button";
+    settingsBtn.textContent = TEXT.tabSettings;
+    settingsBtn.dataset.tab = "settings";
+    settingsBtn.addEventListener("click", () => this._switchTab("settings"));
+    this.settingsTabBtn = settingsBtn;
+
+    tabs.append(historyBtn, settingsBtn);
+
+    const actions = createEl("div", "phg-dialog__actions");
+    // We only need Refresh loop here or inside History view.
+    // Global Header Actions: Close. (Refresh makes sense in header too).
+    this.refreshBtn = this._createButton("🔄", "Reload history", () => this.refresh(), "ghost");
+    this.refreshBtn.classList.add("phg-button--icon");
+
+    this.closeBtn = this._createButton("×", TEXT.settingsClose, () => this.close(), "ghost");
+    this.closeBtn.classList.add("phg-button--icon");
+
+    actions.append(this.refreshBtn, this.closeBtn);
+
+    // Insert tabs between title and actions
+    header.append(titleBlock, tabs, actions);
+
+    // --- Views ---
+    this.historyView = createEl("div", "phg-history-view");
 
     this.statusEl = createEl("div", "phg-dialog__status");
     this.searchRow = this._buildSearchRow();
     this.listEl = createEl("div", "phg-history-list");
+    this.historyView.append(this.statusEl, this.searchRow, this.listEl);
 
-    this.settingsPanel = this._buildSettingsPanel();
+    this.settingsView = this._buildSettingsView();
 
     const body = createEl("div", "phg-dialog__body");
-    body.append(this.settingsPanel, this.statusEl, this.searchRow, this.listEl);
+    // Override default body padding/style slightly for full view behavior if needed, or just append
+    body.append(this.historyView, this.settingsView);
 
     this.dialog.append(header, body);
     this.backdrop.appendChild(this.dialog);
