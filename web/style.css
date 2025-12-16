@@ -626,6 +626,13 @@
   color: var(--p-green-200, #a7f3d0);
 }
 
+.phg-history-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
 .phg-history-list {
   display: flex;
   flex-direction: column;

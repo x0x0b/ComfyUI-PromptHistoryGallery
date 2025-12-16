@@ -944,9 +944,6 @@ class HistoryDialog {
 
     // --- Views ---
     this.historyView = createEl("div", "phg-history-view");
-    this.historyView.style.display = "flex";
-    this.historyView.style.flexDirection = "column";
-    this.historyView.style.height = "100%";
 
     this.statusEl = createEl("div", "phg-dialog__status");
     this.searchRow = this._buildSearchRow();
