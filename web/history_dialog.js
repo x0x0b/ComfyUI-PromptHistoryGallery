@@ -640,10 +640,10 @@ class HistoryDialog {
         );
         const percent = Math.round(ratioValue * 100);
         this.highlightRatioInput.value = String(percent);
-         if (this.highlightRatioInputDisplay) {
+        if (this.highlightRatioInputDisplay) {
             this.highlightRatioInputDisplay.textContent = `${percent}%`;
-         }
-         this.highlightRatioInput.disabled = state.highlightUsage === false;
+        }
+        this.highlightRatioInput.disabled = state.highlightUsage === false;
     }
 
     // Toggle: Preview
