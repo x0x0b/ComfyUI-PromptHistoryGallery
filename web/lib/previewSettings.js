@@ -12,6 +12,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   highlightUsage: true,
   highlightUsageRatio: 0.80,
   highlightUsageStartCount: 5,
+  historyLimit: 120,
 });
 
 export const PREVIEW_POSITIONS = Object.freeze([
@@ -37,6 +38,10 @@ function clampInt(value, min, max, fallback) {
 function clampPercent(value, fallback) {
   const numeric = Number.isFinite(value) ? value : fallback;
   return clamp(numeric, MIN_VIEWPORT_PERCENT, MAX_VIEWPORT_PERCENT);
+}
+
+function clampHistoryLimit(value) {
+  return clampInt(value, 20, 1000, DEFAULT_SETTINGS.historyLimit);
 }
 
 function normalizeSettings(overrides = {}) {
@@ -84,6 +89,7 @@ function normalizeSettings(overrides = {}) {
   if (typeof normalized.enabled !== "boolean") {
     normalized.enabled = DEFAULT_SETTINGS.enabled;
   }
+  normalized.historyLimit = clampHistoryLimit(normalized.historyLimit);
   return normalized;
 }
 

@@ -14,7 +14,8 @@ export {};
 const LOG_PREFIX = "[PromptHistoryGallery]";
 const EXTENSION_NAME = "PromptHistoryGallery.NodeDialog";
 const HISTORY_UPDATE_EVENT = "PromptHistoryGallery.updated";
-const HISTORY_LIMIT = 120;
+const HISTORY_LIMIT_MIN = 20;
+const HISTORY_LIMIT_MAX = 1000;
 const HISTORY_WIDGET_FLAG = "__phg_history_widget__";
 const HISTORY_WIDGET_LABEL = "⏱ History";
 
@@ -44,6 +45,8 @@ const TEXT = {
   settingsSizeHint: "Landscape & square use width; portrait uses height.",
   settingsReset: "Reset defaults",
   settingsClose: "Close",
+  historyLimitLabel: "History items to load",
+  historyLimitHint: "Higher values show more prompts but may load a little slower.",
   searchPlaceholder: "Search prompts or tags…",
   searchClear: "Clear search",
   searchNoResults: "No prompts match your search.",
@@ -261,6 +264,12 @@ class HistoryDialog {
         ) {
           this._renderEntries();
         }
+        if (
+          previous?.historyLimit !== this.settingsState?.historyLimit &&
+          this.state?.isOpen
+        ) {
+          this.refresh();
+        }
       }) ?? null;
 
     this.state = {
@@ -311,7 +320,7 @@ class HistoryDialog {
     this._setLoading(true);
     this._setMessage(TEXT.loading, "muted");
     try {
-      const items = await this.historyApi.list(HISTORY_LIMIT);
+      const items = await this.historyApi.list(this._getHistoryLimit());
       this.state.entries = items;
       this.state.error = "";
       this._setMessage("");
@@ -329,6 +338,16 @@ class HistoryDialog {
     if (this.state.isOpen) {
       this.refresh();
     }
+  }
+
+  _getHistoryLimit() {
+    const settingValue =
+      this.settingsState?.historyLimit ?? DEFAULT_SETTINGS.historyLimit;
+    return clamp(
+      Number(settingValue) || DEFAULT_SETTINGS.historyLimit,
+      HISTORY_LIMIT_MIN,
+      HISTORY_LIMIT_MAX
+    );
   }
 
   _toggleSettings(forceValue) {
@@ -362,6 +381,14 @@ class HistoryDialog {
       DEFAULT_SETTINGS;
     this.settingsState = state;
     const enabled = state.enabled !== false;
+
+    if (this.historyLimitRange) {
+      const limit = this._getHistoryLimit();
+      this.historyLimitRange.value = String(limit);
+      if (this.historyLimitValue) {
+        this.historyLimitValue.textContent = `${limit} items`;
+      }
+    }
 
     if (this.highlightToggleInput) {
       this.highlightToggleInput.checked = state.highlightUsage !== false;
@@ -505,6 +532,7 @@ class HistoryDialog {
       TEXT.usageSettingsTitle,
       TEXT.usageSettingsHint,
       [
+        this._buildHistoryLimitField(),
         this._buildUsageHighlightField(),
         this._buildUsageStartField(),
         this._buildUsageThresholdField(),
@@ -532,6 +560,36 @@ class HistoryDialog {
     fields.forEach((field) => body.append(field));
     card.append(heading, desc, body);
     return card;
+  }
+
+  _buildHistoryLimitField() {
+    const field = createEl("div", "phg-settings-field");
+    const label = createEl("div", "phg-settings-label", TEXT.historyLimitLabel);
+    const hint = createEl("div", "phg-settings-hint", TEXT.historyLimitHint);
+    const value = createEl(
+      "div",
+      "phg-settings-value",
+      `${this._getHistoryLimit()} items`
+    );
+
+    const range = document.createElement("input");
+    range.type = "range";
+    range.min = String(HISTORY_LIMIT_MIN);
+    range.max = String(HISTORY_LIMIT_MAX);
+    range.step = "10";
+    range.value = String(this._getHistoryLimit());
+    range.addEventListener("input", () => {
+      value.textContent = `${range.value} items`;
+    });
+    range.addEventListener("change", () => {
+      const next = clamp(Number(range.value) || DEFAULT_SETTINGS.historyLimit, HISTORY_LIMIT_MIN, HISTORY_LIMIT_MAX);
+      this._applySettingsPatch({ historyLimit: next });
+    });
+
+    field.append(label, range, value, hint);
+    this.historyLimitRange = range;
+    this.historyLimitValue = value;
+    return field;
   }
 
   _buildPreviewToggleField() {

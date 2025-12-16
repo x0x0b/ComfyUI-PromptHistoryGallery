@@ -28,15 +28,15 @@ def _serialize_entry(entry):
     return payload
 
 
-def _get_limit(request, *, default=50, maximum=200):
+def _get_limit(request, *, default=50, minimum=20, maximum=1000):
     value = request.rel_url.query.get("limit")
     if value is None:
-        return default
+        return max(minimum, min(default, maximum))
     try:
         limit = int(value)
     except (TypeError, ValueError):
-        return default
-    return max(1, min(limit, maximum))
+        return max(minimum, min(default, maximum))
+    return max(minimum, min(limit, maximum))
 
 
 @PromptServer.instance.routes.get("/prompt-history")
