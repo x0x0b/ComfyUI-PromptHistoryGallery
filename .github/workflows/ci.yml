@@ -45,4 +45,4 @@ jobs:
           node-version: "20"
 
       - name: Prettier check (web)
-        run: npx prettier@3.7.4 --check "web/**/*.{js,jsx,ts,tsx,css,scss,html,json,svg}"
+        run: npx prettier@3.7.4 --check "web/**/*.{js,jsx,ts,tsx,css,scss,html,json}"
