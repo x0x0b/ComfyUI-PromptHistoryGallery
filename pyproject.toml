@@ -5,9 +5,7 @@ description = "Prompt history input node and sidebar gallery for ComfyUI."
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.10"
-dependencies = [
-    "ruff>=0.14.9",
-]
+dependencies = []
 authors = [
     { name = "x0x0b" },
 ]
@@ -20,7 +18,7 @@ keywords = [
 
 [project.optional-dependencies]
 dev = [
-    "ruff>=0.14.9",
+    "ruff==0.14.9",
 ]
 
 [project.urls]
