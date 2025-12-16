@@ -931,7 +931,10 @@ class HistoryDialog {
     const actions = createEl("div", "phg-dialog__actions");
     // We only need Refresh loop here or inside History view.
     // Global Header Actions: Close. (Refresh makes sense in header too).
-    this.refreshBtn = this._createButton("Refresh", "Reload history", () => this.refresh());
+    this.refreshBtn = this._createButton("🔄", "Reload history", () => this.refresh(), "ghost");
+    this.refreshBtn.style.fontSize = "1.2rem";
+    this.refreshBtn.style.padding = "0.2rem 0.6rem";
+
     this.closeBtn = this._createButton("×", TEXT.settingsClose, () => this.close(), "ghost");
     // Make close button look like an icon
     this.closeBtn.style.fontSize = "1.2rem";
