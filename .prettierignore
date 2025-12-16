@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.parcel-cache/
+prompt_history_gallery/
+prompt_history_gallery/data/
+node.zip
+web/vendor/
+.venv/
+__pycache__/
+*.py

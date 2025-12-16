@@ -5,7 +5,9 @@ description = "Prompt history input node and sidebar gallery for ComfyUI."
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.10"
-dependencies = []
+dependencies = [
+    "ruff>=0.14.9",
+]
 authors = [
     { name = "x0x0b" },
 ]
@@ -16,6 +18,11 @@ keywords = [
     "gallery",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.14.9",
+]
+
 [project.urls]
 Repository = "https://github.com/x0x0b/ComfyUI-PromptHistoryGallery"
 Issues = "https://github.com/x0x0b/ComfyUI-PromptHistoryGallery/issues"
@@ -24,3 +31,20 @@ Issues = "https://github.com/x0x0b/ComfyUI-PromptHistoryGallery/issues"
 PublisherId = "x0x0b"
 DisplayName = "Prompt History Gallery"
 Icon = "https://raw.githubusercontent.com/x0x0b/ComfyUI-PromptHistoryGallery/main/web/icon.svg"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+extend-exclude = [
+    "prompt_history_gallery/data",
+    "node.zip",
+]
+
+[tool.ruff.lint]
+select = [
+    "I",  # import sorting
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
