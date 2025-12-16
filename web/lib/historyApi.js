@@ -37,7 +37,7 @@ export function createHistoryApi(api) {
 
   return {
     async list(limit = DEFAULT_LIMIT) {
-      const safeLimit = Math.max(1, Math.min(Number(limit) || DEFAULT_LIMIT, 200));
+      const safeLimit = Math.max(20, Math.min(Number(limit) || DEFAULT_LIMIT, 1000));
       const payload = await request(`/prompt-history?limit=${safeLimit}`, {
         method: "GET",
         parseJson: true,
