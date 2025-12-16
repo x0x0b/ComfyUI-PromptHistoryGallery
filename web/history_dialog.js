@@ -83,6 +83,7 @@ const PREVIEW_MAX_MS = 15000;
 const PREVIEW_STEP_MS = 250;
 const PREVIEW_MIN_PERCENT = MIN_VIEWPORT_PERCENT;
 const PREVIEW_MAX_PERCENT = MAX_VIEWPORT_PERCENT;
+const LOGGER = console;
 
 class HistoryDialog {
   constructor({ api, comfyApp }) {
@@ -165,7 +166,7 @@ class HistoryDialog {
       this.state.error = "";
       this._setMessage("");
     } catch (error) {
-      logError("refresh error", error);
+      logError(LOGGER, "refresh error", error);
       this.state.error = error?.message ?? "Failed to load prompt history.";
       this._setMessage(this.state.error, "error");
     } finally {
@@ -224,6 +225,13 @@ class HistoryDialog {
     if (!this.settingsStore?.reset) return;
     this.settingsStore.reset();
     this.settingsState = this.settingsStore.getState?.() ?? DEFAULT_SETTINGS;
+    this._syncSettingsUI();
+  }
+
+  _applySettingsPatch(patch) {
+    if (!patch || typeof patch !== "object") return;
+    this.settingsStore?.update?.(patch);
+    this.settingsState = this.settingsStore?.getState?.() ?? this.settingsState;
     this._syncSettingsUI();
   }
 
@@ -1010,7 +1018,7 @@ class HistoryDialog {
       await navigator.clipboard.writeText(entry.prompt ?? "");
       this._setMessage(TEXT.copied, "info");
     } catch (error) {
-      logError("copyPrompt error", error);
+      logError(LOGGER, "copyPrompt error", error);
       this._setMessage("Failed to copy prompt.", "error");
     }
   }
@@ -1025,7 +1033,7 @@ class HistoryDialog {
       this._renderEntries();
       this._setMessage(TEXT.deleteSuccess, "success");
     } catch (error) {
-      logError("delete error", error);
+      logError(LOGGER, "delete error", error);
       this._setMessage(TEXT.deleteError, "error");
     }
   }
@@ -1039,7 +1047,7 @@ class HistoryDialog {
     try {
       await this.viewer.open(entry.id ?? null, sources, Math.max(0, startIndex));
     } catch (error) {
-      logError("openGallery error", error);
+      logError(LOGGER, "openGallery error", error);
       this._setMessage("Failed to open gallery.", "error");
     }
   }
@@ -1072,7 +1080,7 @@ function attachUpdateListeners(api, eventBus) {
         const result = dialog.viewer.open(entry?.id ?? null, sources, safeIndex);
         return result ?? true;
       } catch (error) {
-        logError("preview openGallery error", error);
+        logError(LOGGER, "preview openGallery error", error);
         return false;
       }
     },
@@ -1086,10 +1094,10 @@ function attachUpdateListeners(api, eventBus) {
         previewNotifierInstance.handleHistoryEvent?.(event) ??
         previewNotifierInstance.notifyEntryIds?.(extractEntryIds(event));
       if (result && typeof result.then === "function") {
-        result.catch((error) => logError("preview handler error", error));
+        result.catch((error) => logError(LOGGER, "preview handler error", error));
       }
     } catch (error) {
-      logError("preview handler error", error);
+      logError(LOGGER, "preview handler error", error);
     }
   };
 
@@ -1127,7 +1135,7 @@ function attachHistoryButton(node) {
 }
 
 function registerExtension() {
-  logInfo("loading");
+  logInfo(LOGGER, "loading");
   const comfyApp = resolveComfyApp();
   const comfyApi = resolveComfyApi();
 
