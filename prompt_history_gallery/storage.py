@@ -10,10 +10,18 @@ import sqlite3
 import threading
 import uuid
 from contextlib import contextmanager
-from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
+
+from .models import OutputRecord, PromptHistoryEntry
+from .normalizers import (
+    normalize_metadata,
+    normalize_output_payload,
+    normalize_tags,
+    serialize_metadata,
+    serialize_tags,
+)
 
 
 def _default_storage_directory() -> Path:
@@ -32,95 +40,6 @@ def _ensure_directory(path: Path) -> None:
     Make sure the directory exists before writing any data.
     """
     path.mkdir(parents=True, exist_ok=True)
-
-
-@dataclass(frozen=True)
-class PromptHistoryEntry:
-    """
-    Serializable prompt history item.
-    """
-
-    id: str
-    created_at: str
-    prompt: str
-    tags: List[str]
-    metadata: Dict[str, Any]
-    last_used_at: str
-    files: Tuple[Dict[str, Any], ...] = field(default_factory=tuple)
-
-    def to_dict(self) -> Dict[str, Any]:
-        """
-        Convert the dataclass into a JSON serialisable dictionary.
-        """
-        return {
-            "id": self.id,
-            "created_at": self.created_at,
-            "prompt": self.prompt,
-            "tags": list(self.tags),
-            "metadata": self.metadata.copy(),
-            "last_used_at": self.last_used_at,
-            "files": [item.copy() for item in self.files],
-        }
-
-
-@dataclass(frozen=True)
-class OutputRecord:
-    """
-    Normalized representation of a generated file linked to a prompt entry.
-    """
-
-    filename: str
-    subfolder: str = ""
-    type: str = ""
-
-    def to_dict(self) -> Dict[str, str]:
-        payload: Dict[str, str] = {"filename": self.filename}
-        if self.subfolder:
-            payload["subfolder"] = self.subfolder
-        if self.type:
-            payload["type"] = self.type
-        return payload
-
-
-def _normalize_tags(tags: Iterable[Any]) -> List[str]:
-    return [str(tag).strip() for tag in tags if str(tag).strip()]
-
-
-def _normalize_metadata(metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    return metadata.copy() if isinstance(metadata, dict) else {}
-
-
-def _serialize_tags(tags: List[str]) -> str:
-    return json.dumps(tags, ensure_ascii=False)
-
-
-def _serialize_metadata(metadata: Dict[str, Any]) -> str:
-    return json.dumps(metadata, ensure_ascii=False)
-
-
-def _normalize_output_payload(file_info: Any) -> Optional[OutputRecord]:
-    if isinstance(file_info, str):
-        filename = file_info.strip()
-        if not filename:
-            return None
-        return OutputRecord(filename=filename)
-
-    if isinstance(file_info, dict):
-        filename_raw = file_info.get("filename")
-        if not filename_raw:
-            return None
-        filename = str(filename_raw).strip()
-        if not filename:
-            return None
-        subfolder = str(file_info.get("subfolder", "") or "").strip()
-        output_type = str(file_info.get("type") or file_info.get("kind") or "").strip()
-        return OutputRecord(
-            filename=filename,
-            subfolder=subfolder,
-            type=output_type,
-        )
-
-    return None
 
 
 def _format_output_record(filename: str, subfolder: str, output_type: str) -> OutputRecord:
@@ -209,8 +128,8 @@ class PromptHistoryStorage:
                 "created_at": entry.created_at,
                 "last_used_at": entry.last_used_at,
                 "prompt": entry.prompt,
-                "tags": _serialize_tags(entry.tags),
-                "metadata": _serialize_metadata(entry.metadata),
+                "tags": serialize_tags(entry.tags),
+                "metadata": serialize_metadata(entry.metadata),
             },
         )
         return entry
@@ -227,8 +146,8 @@ class PromptHistoryStorage:
         """
         payload = {
             "prompt": prompt,
-            "tags": _serialize_tags(tags),
-            "metadata": _serialize_metadata(metadata),
+            "tags": serialize_tags(tags),
+            "metadata": serialize_metadata(metadata),
         }
         row = cursor.execute(
             """
@@ -267,8 +186,8 @@ class PromptHistoryStorage:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> PromptHistoryEntry:
         """Persist a new entry for the provided prompt text."""
-        incoming_tags = _normalize_tags(tags)
-        incoming_metadata = _normalize_metadata(metadata)
+        incoming_tags = normalize_tags(tags)
+        incoming_metadata = normalize_metadata(metadata)
         with self._locked_cursor(commit=True) as cursor:
             entry = self._create_entry_locked(
                 cursor,
@@ -289,8 +208,8 @@ class PromptHistoryStorage:
         Retrieve an existing entry that matches the provided payload, or create one.
         Returns the entry and a flag indicating whether it was newly created.
         """
-        incoming_tags = _normalize_tags(tags)
-        incoming_metadata = _normalize_metadata(metadata)
+        incoming_tags = normalize_tags(tags)
+        incoming_metadata = normalize_metadata(metadata)
         with self._locked_cursor(commit=True) as cursor:
             existing = self._find_entry_locked(cursor, prompt, incoming_tags, incoming_metadata)
             if existing is not None:
@@ -330,7 +249,7 @@ class PromptHistoryStorage:
 
         normalized: List[OutputRecord] = []
         for file_info in files:
-            payload = _normalize_output_payload(file_info)
+            payload = normalize_output_payload(file_info)
             if payload:
                 normalized.append(payload)
 
@@ -496,27 +415,6 @@ class PromptHistoryStorage:
 
 _STORAGE_INSTANCE: Optional[PromptHistoryStorage] = None
 _INSTANCE_LOCK = threading.Lock()
-
-_PROMPT_ENTRY_REGISTRY: Dict[str, List[str]] = {}
-_REGISTRY_LOCK = threading.Lock()
-
-
-def register_prompt_entry(prompt_id: Optional[str], entry_id: str) -> None:
-    """Track prompt executions so generated files can be linked later."""
-    if not prompt_id:
-        return
-    with _REGISTRY_LOCK:
-        bucket = _PROMPT_ENTRY_REGISTRY.setdefault(prompt_id, [])
-        bucket.append(entry_id)
-
-
-def consume_prompt_entries(prompt_id: Optional[str]) -> List[str]:
-    """Retrieve and clear pending entries for the given prompt id."""
-    if not prompt_id:
-        return []
-    with _REGISTRY_LOCK:
-        return _PROMPT_ENTRY_REGISTRY.pop(prompt_id, [])
-
 
 def get_prompt_history_storage() -> PromptHistoryStorage:
     """

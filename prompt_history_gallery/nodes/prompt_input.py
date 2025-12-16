@@ -5,51 +5,15 @@ Prompt input node that records text prompts into history storage.
 from __future__ import annotations
 
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 from comfy_execution.utils import get_executing_context
 
-from ..storage import get_prompt_history_storage, register_prompt_entry
+from ..normalizers import normalize_metadata, normalize_tags
+from ..registry import register_prompt_entry
+from ..storage import get_prompt_history_storage
 
 _NODE_METADATA_KEY = "_prompt_history_node"
-
-
-def _coerce_tags(raw: Any) -> List[str]:
-    """
-    Convert user-provided tags to a normalized list.
-    """
-    if raw is None:
-        return []
-    if isinstance(raw, (list, tuple, set)):
-        candidates = list(raw)
-    else:
-        # Support comma or newline separated strings.
-        text = str(raw)
-        text = text.replace("\n", ",")
-        candidates = text.split(",")
-    tags = []
-    for value in candidates:
-        item = str(value).strip()
-        if item:
-            tags.append(item)
-    return tags
-
-
-def _ensure_metadata(raw: Any) -> Dict[str, Any]:
-    """
-    Metadata must be a dict for downstream nodes to consume.
-    """
-    if isinstance(raw, dict):
-        return raw
-    # Convert lists of pairs into dict, otherwise fallback to empty.
-    if isinstance(raw, (list, tuple)):
-        result: Dict[str, Any] = {}
-        for item in raw:
-            if isinstance(item, (list, tuple)) and len(item) == 2 and isinstance(item[0], str):
-                result[item[0]] = item[1]
-        if result:
-            return result
-    return {}
 
 
 def _resolve_node_identifier(context: Any) -> Optional[str]:
@@ -120,9 +84,8 @@ class PromptHistoryInput:
         tags: str = "",
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Tuple[Any]:
-        tags_list = _coerce_tags(tags)
-        metadata_dict = _ensure_metadata(metadata)
-        metadata_dict = metadata_dict.copy()
+        tags_list = normalize_tags(tags)
+        metadata_dict = normalize_metadata(metadata)
         context = get_executing_context()
         prompt_id = context.prompt_id if context else None
         node_identifier = _resolve_node_identifier(context)
