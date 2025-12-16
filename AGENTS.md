@@ -19,6 +19,7 @@ This repository is a ComfyUI extension that registers prompt history nodes and a
 - Web assets: `npx prettier@3.7.4 --check "web/**/*.{js,jsx,ts,tsx,css,scss,html,json}"` (respects `.prettierignore`; `web/vendor/` excluded).
 - Install tools via `pip install -e .[dev]` (adds Ruff) or `pip install ruff`. Prettier comes via `npx`; Node.js is needed only if you run `npx`.
 - CI: `.github/workflows/ci.yml` runs `ruff format --check .`, `ruff check --select I .`, and `npx prettier@3.7.4 --check "web/**/*.{js,jsx,ts,tsx,css,scss,html,json}"` on push/PR to `main`.
+- One-shot fixer: run `scripts/format.sh` (requires `pipx`, Node). It executes `pipx run --spec ruff==0.14.9 ruff format .`, `pipx run --spec ruff==0.14.9 ruff check --select I --fix .`, and `npx prettier@3.7.4 -w "web/**/*.{js,jsx,ts,tsx,css,scss,html,json}"`.
 
 ## Coding Style & Naming Conventions
 - Target Python 3.10+. Follow PEP 8, 4-space indents, and type hints (dataclasses in `storage.py` are the pattern).
