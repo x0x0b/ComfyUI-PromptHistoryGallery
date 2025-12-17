@@ -5,13 +5,12 @@ This repository is a ComfyUI extension that registers prompt history nodes and a
 ## Project Structure & Module Organization
 - Core package: `prompt_history_gallery/` (nodes, storage, watcher, hooks). `nodes/prompt_input.py` implements the ComfyUI node; `storage.py` manages SQLite; `history_watcher.py` links runtime history to stored prompts.
 - Front-end: `web/` (sidebar JS, CSS, icons) served via `WEB_DIRECTORY` in `__init__.py`.
-- Release bundle: `node.zip` mirrors shipped contents—refresh it when publishing.
+- Release bundle: `node.zip` is published by GitHub Actions; no manual rebuild step is required.
 - Data: `prompt_history_gallery/data/` holds the SQLite DB, ignored by Git; override with `COMFYUI_PROMPT_HISTORY_DIR` while testing.
 
 ## Build, Run, and Local Development
 - No build step; ComfyUI loads directly from `custom_nodes/`.
 - Run ComfyUI from its repo root to exercise changes: `cd ../.. && python main.py --listen 0.0.0.0:8188` (this extension auto-registers on boot).
-- Rebuild the distributable: `zip -r node.zip prompt_history_gallery web LICENSE README.md pyproject.toml`.
 - Quick syntax check: `python -m compileall prompt_history_gallery`.
 
 ## Formatting
@@ -34,7 +33,7 @@ This repository is a ComfyUI extension that registers prompt history nodes and a
 ## Commit & Pull Request Guidelines
 - Match the repo history: concise, imperative subjects with prefixes such as `fix:`, `feat:`, or `chore:` (e.g., `fix: adjust viewer list item width`).
 - For UI changes, include before/after screenshots of the Prompt History tab plus test notes (curl checks, ComfyUI version).
-- When releasing, bump `version` in `pyproject.toml` and rebuild `node.zip`. Reference related issues/PR IDs where relevant.
+- When releasing, bump `version` in `pyproject.toml`. GitHub Actions handles the `node.zip` publish step. Reference related issues/PR IDs where relevant.
 
 ## Maintenance
 - When behavior, schema, or release steps change, update this document to keep commands, paths, and expectations in sync.
