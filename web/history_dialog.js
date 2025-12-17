@@ -216,9 +216,7 @@ class HistoryDialog {
       PREVIEW_MIN_MS,
       PREVIEW_MAX_MS
     );
-    const seconds = safeValue / 1000;
-    const precision = seconds >= 10 ? 0 : 1;
-    return `${seconds.toFixed(precision)}s`;
+    return `${safeValue}ms`;
   }
 
   _resetSettings() {
