@@ -756,23 +756,6 @@ class HistoryDialog {
     // Make focusable so we can intercept events.
     pre.tabIndex = 0;
 
-    pre.addEventListener("keydown", (e) => {
-      // Stop propagation for Copy to prevent ComfyUI from stealing it
-      if ((e.ctrlKey || e.metaKey) && e.key === "c") {
-        e.stopPropagation();
-      }
-    });
-
-    pre.addEventListener("copy", (e) => {
-      const selection = window.getSelection();
-      const selectedText = selection.toString();
-      if (selectedText) {
-        e.clipboardData.setData("text/plain", selectedText);
-        e.preventDefault(); // Prevent default browser behavior just in case
-        e.stopPropagation();
-      }
-    });
-
     container.append(pre);
     return container;
   }
