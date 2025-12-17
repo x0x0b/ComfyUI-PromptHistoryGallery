@@ -639,6 +639,28 @@ class HistoryDialog {
         this.close();
       }
     });
+
+    this._attachDialogKeyGuards();
+  }
+
+  _attachDialogKeyGuards() {
+    if (!this.backdrop) return;
+
+    const shouldTrapCopy = (event) => {
+      const key = typeof event.key === "string" ? event.key.toLowerCase() : "";
+      return (event.ctrlKey || event.metaKey) && key === "c";
+    };
+
+    // Capture phase guard so global ComfyUI listeners don't steal Ctrl/Cmd+C
+    this.backdrop.addEventListener(
+      "keydown",
+      (event) => {
+        if (!this.state.isOpen || !shouldTrapCopy(event)) return;
+        // Keep default copy behavior intact but stop it from bubbling to the graph canvas.
+        event.stopPropagation();
+      },
+      true
+    );
   }
 
   _createButton(label, title, onClick, variant = "primary") {
@@ -668,7 +690,12 @@ class HistoryDialog {
       };
       chip.addEventListener("click", handler);
       chip.addEventListener("keydown", (event) => {
-        if (event.key === "Enter" || event.key === " ") {
+        const key = event.key;
+        // Let global dialog guard handle copy; only handle activation keys here.
+        if ((event.ctrlKey || event.metaKey) && typeof key === "string" && key.toLowerCase() === "c") {
+          return;
+        }
+        if (key === "Enter" || key === " ") {
           event.preventDefault();
           handler(event);
         }
