@@ -24,4 +24,3 @@ def consume_prompt_entries(prompt_id: Optional[str]) -> List[str]:
         return []
     with _REGISTRY_LOCK:
         return _PROMPT_ENTRY_REGISTRY.pop(prompt_id, [])
-

@@ -416,6 +416,7 @@ class PromptHistoryStorage:
 _STORAGE_INSTANCE: Optional[PromptHistoryStorage] = None
 _INSTANCE_LOCK = threading.Lock()
 
+
 def get_prompt_history_storage() -> PromptHistoryStorage:
     """
     Retrieve a module-level singleton storage.

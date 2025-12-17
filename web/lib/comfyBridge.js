@@ -26,7 +26,7 @@ export function normalizeTargetPayload(node) {
   const nodeTitle =
     typeof node.getTitle === "function"
       ? node.getTitle()
-      : node.title ?? node.comfyClass ?? "Prompt History Input";
+      : (node.title ?? node.comfyClass ?? "Prompt History Input");
   return {
     nodeId,
     graph: node.graph ?? null,
@@ -70,7 +70,7 @@ export function resolveNodeFromTarget(target, logger = console) {
 export function applyPromptToWidget(node, widget, promptText, comfyApp = resolveComfyApp()) {
   if (!node || !widget) return false;
   const normalized = typeof promptText === "string" ? promptText : String(promptText ?? "");
-  const previous = typeof widget.value === "string" ? widget.value : widget.value ?? "";
+  const previous = typeof widget.value === "string" ? widget.value : (widget.value ?? "");
   if (previous === normalized) {
     return false;
   }

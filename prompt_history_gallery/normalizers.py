@@ -78,4 +78,3 @@ def serialize_tags(tags: List[str]) -> str:
 
 def serialize_metadata(metadata: Dict[str, Any]) -> str:
     return json.dumps(metadata, ensure_ascii=False)
-

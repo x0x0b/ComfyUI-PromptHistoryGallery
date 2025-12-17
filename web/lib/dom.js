@@ -1,8 +1,7 @@
 export const LOG_PREFIX = "[PromptHistoryGallery]";
 
 export const logInfo = (logger = console, ...messages) => logger?.info?.(LOG_PREFIX, ...messages);
-export const logError = (logger = console, ...messages) =>
-  logger?.error?.(LOG_PREFIX, ...messages);
+export const logError = (logger = console, ...messages) => logger?.error?.(LOG_PREFIX, ...messages);
 
 export const createEl = (tag, className = "", text = null) => {
   const el = document.createElement(tag);
