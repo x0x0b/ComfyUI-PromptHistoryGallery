@@ -62,6 +62,8 @@ const TEXT = {
   historyLimitLabel: "History Limit",
   historyLimitHint: "Number of prompts to keep in history.",
   searchPlaceholder: "Search prompts or tags…",
+  searchModeAnd: "Match all terms (AND)",
+  searchModeOr: "Match any term (OR)",
   searchClear: "Clear",
   searchNoResults: "No prompts match your search.",
   usageSettingsHighlight: "Highlight Frequent Prompts",
@@ -123,6 +125,7 @@ class HistoryDialog {
       target: null,
       activeTab: "history",
       searchQuery: "",
+      searchMode: "and",
     };
 
     this.messageTimeout = null;
@@ -693,6 +696,21 @@ class HistoryDialog {
       this._renderEntries();
     });
 
+    const modeBtn = this._createButton(
+      this.state.searchMode.toUpperCase(),
+      this.state.searchMode === "and" ? TEXT.searchModeAnd : TEXT.searchModeOr,
+      () => {
+        this.state.searchMode = this.state.searchMode === "and" ? "or" : "and";
+        modeBtn.textContent = this.state.searchMode.toUpperCase();
+        modeBtn.title = this.state.searchMode === "and" ? TEXT.searchModeAnd : TEXT.searchModeOr;
+        modeBtn.setAttribute("aria-pressed", this.state.searchMode === "or");
+        this._renderEntries();
+      },
+      "ghost"
+    );
+    modeBtn.classList.add("phg-search__mode");
+    modeBtn.setAttribute("aria-pressed", this.state.searchMode === "or");
+
     const clearBtn = this._createButton(
       "×",
       TEXT.searchClear,
@@ -707,7 +725,7 @@ class HistoryDialog {
     clearBtn.classList.add("phg-search__clear");
 
     const icon = createEl("span", "phg-search__icon", "🔍");
-    row.append(icon, input, clearBtn);
+    row.append(icon, input, modeBtn, clearBtn);
     this.searchInput = input;
     return row;
   }
@@ -978,13 +996,20 @@ class HistoryDialog {
     if (!Array.isArray(entries) || !entries.length) return [];
     const query = (this.state.searchQuery ?? "").trim().toLowerCase();
     if (!query) return entries;
+    const terms = query
+      .split(/[\s,]+/)
+      .map((term) => term.trim())
+      .filter(Boolean);
+    if (!terms.length) return entries;
+    const isOrMode = this.state.searchMode === "or";
     return entries.filter((entry) => {
       const promptText = String(entry.prompt ?? "").toLowerCase();
       const tags = Array.isArray(entry.tags)
         ? entry.tags.map((tag) => String(tag ?? "").toLowerCase())
         : [];
-      if (promptText.includes(query)) return true;
-      return tags.some((tag) => tag.includes(query));
+      const matchesTerm = (term) =>
+        promptText.includes(term) || tags.some((tag) => tag.includes(term));
+      return isOrMode ? terms.some(matchesTerm) : terms.every(matchesTerm);
     });
   }
 

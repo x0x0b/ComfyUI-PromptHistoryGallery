@@ -607,6 +607,14 @@
   outline: none;
 }
 
+.phg-search__mode {
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  padding: 0.2rem 0.6rem;
+  min-width: 3.2rem;
+  text-transform: uppercase;
+}
+
 .phg-search__clear {
   padding: 0.15rem 0.55rem;
   min-width: 0;
