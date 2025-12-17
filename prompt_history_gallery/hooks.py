@@ -5,7 +5,9 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
-from .storage import consume_prompt_entries, get_prompt_history_storage
+from .normalizers import normalize_output_payload
+from .registry import consume_prompt_entries
+from .storage import get_prompt_history_storage
 
 LOGGER = logging.getLogger(__name__)
 
@@ -28,20 +30,9 @@ def _extract_generated_files(history_result: Any) -> List[Dict[str, Any]]:
             if not isinstance(entries, list):
                 continue
             for entry in entries:
-                if isinstance(entry, dict):
-                    filename = entry.get("filename")
-                    if not filename:
-                        continue
-                    payload: Dict[str, Any] = {"filename": str(filename)}
-                    subfolder = entry.get("subfolder")
-                    if subfolder:
-                        payload["subfolder"] = str(subfolder)
-                    output_type = entry.get("type") or entry.get("kind")
-                    if output_type:
-                        payload["type"] = str(output_type)
-                    collected.append(payload)
-                elif isinstance(entry, str):
-                    collected.append({"filename": entry})
+                record = normalize_output_payload(entry)
+                if record:
+                    collected.append(record.to_dict())
 
     return collected
 
