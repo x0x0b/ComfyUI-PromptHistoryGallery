@@ -113,6 +113,8 @@ class HistoryDialog {
         }
       }) ?? null;
 
+    this._comfyShortcutGuard = null;
+
     this.state = {
       isOpen: false,
       loading: false,
@@ -142,6 +144,7 @@ class HistoryDialog {
       return;
     }
     this.state.isOpen = true;
+    this._installComfyShortcutGuard();
     this.backdrop.classList.remove("phg-hidden");
     this.refresh();
   }
@@ -149,6 +152,7 @@ class HistoryDialog {
   close() {
     if (!this.state.isOpen) return;
     this.state.isOpen = false;
+    this._removeComfyShortcutGuard();
     this.backdrop.classList.add("phg-hidden");
     this.viewer.close();
   }
@@ -771,6 +775,93 @@ class HistoryDialog {
 
     container.append(pre);
     return container;
+  }
+
+  _dialogHasFocus() {
+    if (!this.dialog) return false;
+    const active = document.activeElement;
+    if (active && this.dialog.contains(active)) return true;
+    const selection = window.getSelection?.();
+    if (!selection) return false;
+    if (selection.anchorNode && this.dialog.contains(selection.anchorNode)) return true;
+    if (selection.focusNode && this.dialog.contains(selection.focusNode)) return true;
+    return false;
+  }
+
+  _shouldBlockComfyClipboard(event = null) {
+    if (!this.state.isOpen) return false;
+    if (!this._dialogHasFocus()) return false;
+    if (!event) return true;
+    if (!event.ctrlKey && !event.metaKey) return false;
+    const key = event.key?.toLowerCase();
+    const code = event.code?.toLowerCase();
+    return key === "c" || key === "v" || code === "keyc" || code === "keyv";
+  }
+
+  _installComfyShortcutGuard() {
+    if (this._comfyShortcutGuard) return;
+    const guard = { restores: [] };
+    const dialog = this;
+
+    const wrap = (obj, name, wrapper) => {
+      if (!obj || typeof obj[name] !== "function") return;
+      const original = obj[name];
+      if (original.__phgWrapped) return;
+      const wrapped = function (...args) {
+        return wrapper.call(this, original, ...args);
+      };
+      wrapped.__phgWrapped = true;
+      wrapped.__phgOriginal = original;
+      obj[name] = wrapped;
+      guard.restores.push(() => {
+        obj[name] = original;
+      });
+    };
+
+    const wrapKeyHandler = (obj, name) => {
+      wrap(obj, name, function (original, event, ...rest) {
+        if (dialog._shouldBlockComfyClipboard(event)) {
+          return false;
+        }
+        return original.call(this, event, ...rest);
+      });
+    };
+
+    const wrapClipboard = (obj, name) => {
+      wrap(obj, name, function (original, ...args) {
+        if (dialog._shouldBlockComfyClipboard()) {
+          return undefined;
+        }
+        return original.apply(this, args);
+      });
+    };
+
+    const comfyApp = this.comfyApp ?? resolveComfyApp();
+    const canvas = comfyApp?.canvas ?? null;
+    const proto =
+      window.LGraphCanvas?.prototype ?? window.LiteGraph?.LGraphCanvas?.prototype ?? null;
+
+    [canvas, proto].forEach((target) => {
+      wrapKeyHandler(target, "onKeyDown");
+      wrapKeyHandler(target, "processKey");
+      wrapClipboard(target, "copyToClipboard");
+      wrapClipboard(target, "pasteFromClipboard");
+    });
+
+    this._comfyShortcutGuard = guard;
+  }
+
+  _removeComfyShortcutGuard() {
+    const guard = this._comfyShortcutGuard;
+    if (!guard) return;
+    for (const restore of guard.restores.reverse()) {
+      try {
+        restore();
+      } catch (error) {
+        logError(LOGGER, "comfy shortcut guard restore error", error);
+      }
+    }
+    this._comfyShortcutGuard = null;
   }
 
   _buildTags(tags) {
