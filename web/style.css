@@ -605,6 +605,14 @@
   font-size: 0.95rem;
   padding: 0.35rem 0.1rem;
   outline: none;
+  -webkit-appearance: none;
+}
+
+.phg-search__input::-webkit-search-cancel-button,
+.phg-search__input::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+  display: none;
 }
 
 .phg-search__mode {
