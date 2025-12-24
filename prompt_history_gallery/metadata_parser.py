@@ -1,6 +1,7 @@
 """
 Helper to extract metadata (prompt, workflow) from generated images.
 """
+
 from __future__ import annotations
 
 import json
