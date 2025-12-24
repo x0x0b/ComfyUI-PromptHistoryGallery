@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -96,19 +97,47 @@ def _extract_metadata_from_files(files: Iterable[Dict[str, Any]]) -> Dict[str, A
     return {}
 
 
+def _extract_workflow_from_history(history_result: Any) -> Optional[Any]:
+    if not isinstance(history_result, dict):
+        return None
+    prompt_data = history_result.get("prompt")
+    if isinstance(prompt_data, (list, tuple)) and len(prompt_data) > 3:
+        extra_data = prompt_data[3]
+        if isinstance(extra_data, dict):
+            workflow = extra_data.get("extra_pnginfo", {}).get("workflow")
+            if isinstance(workflow, str):
+                try:
+                    return json.loads(workflow)
+                except Exception:
+                    return None
+            return workflow
+    return None
+
+
 def _build_metadata_update(
-    prompt_payload: Any, files: Iterable[Dict[str, Any]]
+    prompt_payload: Any,
+    files: Iterable[Dict[str, Any]],
+    workflow_payload: Optional[Any] = None,
 ) -> Dict[str, Any]:
     metadata_update: Dict[str, Any] = {}
     image_metadata = _extract_metadata_from_files(files)
     if image_metadata:
         metadata_update.update(image_metadata)
 
+    # Fallback for workflow if not in image metadata
+    if workflow_payload and "comfyui_workflow" not in metadata_update:
+        metadata_update["comfyui_workflow"] = workflow_payload
+        # If we fell back to workflow payload, try to extract params from it too
+        workflow_params = extract_comfyui_parameters(workflow_data=workflow_payload)
+        for key, value in workflow_params.items():
+            metadata_update.setdefault(key, value)
+
     prompt_metadata = extract_comfyui_parameters(prompt_data=prompt_payload)
     for key, value in prompt_metadata.items():
         metadata_update.setdefault(key, value)
 
-    if prompt_payload and "comfyui_prompt" not in metadata_update:
+    # Always prefer the payload prompt as the source of truth for the prompt structure
+    if prompt_payload:
         metadata_update["comfyui_prompt"] = prompt_payload
 
     return metadata_update
@@ -164,7 +193,8 @@ def handle_prompt_completion(
     if files:
         storage.add_outputs_for_entries(entry_ids, files)
 
-    metadata_update = _build_metadata_update(prompt_payload, files)
+    workflow_payload = _extract_workflow_from_history(history_result)
+    metadata_update = _build_metadata_update(prompt_payload, files, workflow_payload)
     if metadata_update:
         for entry_id in entry_ids:
             storage.update_metadata(entry_id, metadata_update)

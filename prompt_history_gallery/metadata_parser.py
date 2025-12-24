@@ -7,7 +7,10 @@ import json
 import os
 from typing import Any, Dict, Optional
 
-from PIL import Image
+try:
+    from PIL import Image
+except ImportError:
+    Image = None
 
 try:
     import folder_paths
@@ -163,6 +166,9 @@ def parse_image_metadata(image_path: str) -> Dict[str, Any]:
     """
     Read ComfyUI metadata (prompt, workflow) from a PNG file.
     """
+    if Image is None:
+        return {}
+
     if not image_path or not os.path.exists(image_path):
         return {}
 
