@@ -59,6 +59,9 @@ function extractFromWorkflow(workflow, params) {
             }
         } else if (type === "CheckpointLoaderSimple") {
             if (widgets[0] && typeof widgets[0] === 'string') params.model = widgets[0];
+        } else if (type === "CheckpointLoader") {
+             // CheckpointLoader has config_name at 0, ckpt_name at 1
+             if (widgets[1] && typeof widgets[1] === 'string') params.model = widgets[1];
         } else if (type === "EmptyLatentImage") {
              if (widgets.length >= 2) {
                  if (typeof widgets[0] === 'number') params.width = widgets[0];
@@ -87,19 +90,19 @@ function extractFromPrompt(prompt, params) {
         const classType = node.class_type;
         const inputs = node.inputs || {};
 
-        if (classType === "CheckpointLoaderSimple") {
-            if (inputs.ckpt_name) params.model = inputs.ckpt_name;
+        if (classType === "CheckpointLoaderSimple" || classType === "CheckpointLoader") {
+            if (inputs.ckpt_name && typeof inputs.ckpt_name === 'string') params.model = inputs.ckpt_name;
         } else if (["KSampler", "KSamplerAdvanced"].includes(classType)) {
-            if (inputs.seed !== undefined) params.seed = inputs.seed;
-            if (inputs.steps !== undefined) params.steps = inputs.steps;
-            if (inputs.cfg !== undefined) params.cfg = inputs.cfg;
-            if (inputs.sampler_name) params.sampler = inputs.sampler_name;
-            if (inputs.scheduler) params.scheduler = inputs.scheduler;
-            if (inputs.denoise !== undefined && inputs.denoise !== 1.0) params.denoise = inputs.denoise;
+            if (typeof inputs.seed === 'number' || typeof inputs.seed === 'string') params.seed = inputs.seed;
+            if (typeof inputs.steps === 'number') params.steps = inputs.steps;
+            if (typeof inputs.cfg === 'number') params.cfg = inputs.cfg;
+            if (typeof inputs.sampler_name === 'string') params.sampler = inputs.sampler_name;
+            if (typeof inputs.scheduler === 'string') params.scheduler = inputs.scheduler;
+            if (typeof inputs.denoise === 'number' && inputs.denoise !== 1.0) params.denoise = inputs.denoise;
         } else if (classType === "EmptyLatentImage") {
-            if (inputs.width) params.width = inputs.width;
-            if (inputs.height) params.height = inputs.height;
-            if (inputs.batch_size) params.batch_size = inputs.batch_size;
+            if (typeof inputs.width === 'number') params.width = inputs.width;
+            if (typeof inputs.height === 'number') params.height = inputs.height;
+            if (typeof inputs.batch_size === 'number') params.batch_size = inputs.batch_size;
         } else if (classType === "CLIPTextEncode") {
             if (inputs.text && typeof inputs.text === 'string') {
                  const text = inputs.text;
