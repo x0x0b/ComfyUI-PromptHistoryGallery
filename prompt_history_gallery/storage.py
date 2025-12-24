@@ -183,8 +183,12 @@ class PromptHistoryStorage:
             candidate_entry = self._row_to_entry(candidate_row)
 
             candidate_metadata = _strip_ignored(candidate_entry.metadata)
-            if candidate_metadata == target_metadata:
-                return candidate_entry
+            # If the prompt is the same, we consider it the same entry regardless of metadata differences
+            # This is because metadata (seed, etc.) is often updated *after* generation.
+            # However, if the user explicitly wants to separate entries by metadata, this logic might need adjustment.
+            # For now, per request: "If positive prompt is the same, treat as same".
+            # The query already filters by prompt = ?, so we just return the first match.
+            return candidate_entry
 
         return None
 
