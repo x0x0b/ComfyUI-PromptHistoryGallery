@@ -88,7 +88,7 @@ def _extract_params_from_workflow(
                 _set_string(params, "sampler", widgets[3])
                 if len(widgets) > 4:
                     _set_string(params, "scheduler", widgets[4])
-        elif node_type == "CheckpointLoaderSimple":
+        elif node_type == "CheckpointLoaderSimple" or node_type == "Checkpoint Loader":
             if widgets:
                 _set_string(params, "model", widgets[0])
         elif node_type == "CheckpointLoader":
@@ -123,7 +123,7 @@ def _extract_params_from_prompt(
         if not isinstance(inputs, dict):
             inputs = {}
 
-        if class_type in ("CheckpointLoader", "CheckpointLoaderSimple"):
+        if class_type in ("CheckpointLoader", "CheckpointLoaderSimple", "Checkpoint Loader"):
             _set_string(params, "model", inputs.get("ckpt_name"))
         elif class_type in ("KSampler", "KSamplerAdvanced"):
             seed = inputs.get("seed")

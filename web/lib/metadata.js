@@ -72,7 +72,7 @@ function extractFromWorkflow(workflow, params) {
         if (typeof widgets[3] === "string") params.sampler = widgets[3];
         if (widgets.length > 4 && typeof widgets[4] === "string") params.scheduler = widgets[4];
       }
-    } else if (type === "CheckpointLoaderSimple") {
+    } else if (type === "CheckpointLoaderSimple" || type === "Checkpoint Loader") {
       if (widgets[0] && typeof widgets[0] === "string") params.model = widgets[0];
     } else if (type === "CheckpointLoader") {
       // CheckpointLoader has config_name at 0, ckpt_name at 1
@@ -105,7 +105,11 @@ function extractFromPrompt(prompt, params) {
     const classType = node.class_type;
     const inputs = node.inputs || {};
 
-    if (classType === "CheckpointLoaderSimple" || classType === "CheckpointLoader") {
+    if (
+      classType === "CheckpointLoaderSimple" ||
+      classType === "CheckpointLoader" ||
+      classType === "Checkpoint Loader"
+    ) {
       if (inputs.ckpt_name && typeof inputs.ckpt_name === "string") params.model = inputs.ckpt_name;
     } else if (["KSampler", "KSamplerAdvanced"].includes(classType)) {
       if (typeof inputs.seed === "number" || typeof inputs.seed === "string")
