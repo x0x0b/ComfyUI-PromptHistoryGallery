@@ -37,3 +37,6 @@ Thumbs.db
 
 # publish outputs
 node.zip
+
+.gemini/
+gha-creds-*.json
