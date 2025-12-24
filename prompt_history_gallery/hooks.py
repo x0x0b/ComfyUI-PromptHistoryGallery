@@ -2,15 +2,9 @@
 
 from __future__ import annotations
 
-import json
 import logging
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, List, Optional
 
-from .metadata_parser import (
-    extract_comfyui_parameters,
-    get_image_path,
-    parse_image_metadata,
-)
 from .normalizers import normalize_output_payload
 from .registry import consume_prompt_entries
 from .storage import get_prompt_history_storage
@@ -67,82 +61,6 @@ def _extract_prompt_texts(prompt_payload: Any) -> List[str]:
     return prompts
 
 
-def _extract_metadata_from_files(files: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
-    for file_info in files:
-        if not isinstance(file_info, dict):
-            continue
-
-        filename = file_info.get("filename")
-        if not filename or not isinstance(filename, str):
-            continue
-
-        subfolder = str(file_info.get("subfolder") or "")
-        folder_type = str(file_info.get("type") or "")
-
-        candidate_types = []
-        if folder_type:
-            candidate_types.append(folder_type)
-        for fallback in ("output", "temp", "input"):
-            if fallback not in candidate_types:
-                candidate_types.append(fallback)
-
-        for candidate in candidate_types:
-            image_path = get_image_path(filename, subfolder, candidate)
-            if not image_path:
-                continue
-            metadata = parse_image_metadata(image_path)
-            if metadata:
-                return metadata
-
-    return {}
-
-
-def _extract_workflow_from_history(history_result: Any) -> Optional[Any]:
-    if not isinstance(history_result, dict):
-        return None
-    prompt_data = history_result.get("prompt")
-    if isinstance(prompt_data, (list, tuple)) and len(prompt_data) > 3:
-        extra_data = prompt_data[3]
-        if isinstance(extra_data, dict):
-            workflow = extra_data.get("extra_pnginfo", {}).get("workflow")
-            if isinstance(workflow, str):
-                try:
-                    return json.loads(workflow)
-                except Exception:
-                    return None
-            return workflow
-    return None
-
-
-def _build_metadata_update(
-    prompt_payload: Any,
-    files: Iterable[Dict[str, Any]],
-    workflow_payload: Optional[Any] = None,
-) -> Dict[str, Any]:
-    metadata_update: Dict[str, Any] = {}
-    image_metadata = _extract_metadata_from_files(files)
-    if image_metadata:
-        metadata_update.update(image_metadata)
-
-    # Fallback for workflow if not in image metadata
-    if workflow_payload and "comfyui_workflow" not in metadata_update:
-        metadata_update["comfyui_workflow"] = workflow_payload
-        # If we fell back to workflow payload, try to extract params from it too
-        workflow_params = extract_comfyui_parameters(workflow_data=workflow_payload)
-        for key, value in workflow_params.items():
-            metadata_update.setdefault(key, value)
-
-    prompt_metadata = extract_comfyui_parameters(prompt_data=prompt_payload)
-    for key, value in prompt_metadata.items():
-        metadata_update.setdefault(key, value)
-
-    # Always prefer the payload prompt as the source of truth for the prompt structure
-    if prompt_payload:
-        metadata_update["comfyui_prompt"] = prompt_payload
-
-    return metadata_update
-
-
 def _resolve_entry_ids(
     prompt_id: Optional[str],
     prompt_payload: Any,
@@ -189,15 +107,14 @@ def handle_prompt_completion(
     if not entry_ids:
         return
 
+    # Store the full prompt payload in metadata for later use
+    if prompt_payload:
+        for entry_id in entry_ids:
+            storage.update_metadata(entry_id, {"comfyui_prompt": prompt_payload})
+
     files = _extract_generated_files(history_result)
     if files:
         storage.add_outputs_for_entries(entry_ids, files)
-
-    workflow_payload = _extract_workflow_from_history(history_result)
-    metadata_update = _build_metadata_update(prompt_payload, files, workflow_payload)
-    if metadata_update:
-        for entry_id in entry_ids:
-            storage.update_metadata(entry_id, metadata_update)
 
     storage.touch_entries(entry_ids)
     _notify_clients(server, entry_ids, files)

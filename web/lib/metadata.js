@@ -38,20 +38,6 @@ export function extractMetadata(entry) {
     extractFromPrompt(promptData, params);
   }
 
-  // Enforce metadata from backend (PNG source) if available
-  if (entry.metadata) {
-    const m = entry.metadata;
-    if (m.seed !== undefined) params.seed = m.seed;
-    if (m.steps !== undefined) params.steps = m.steps;
-    if (m.cfg !== undefined) params.cfg = m.cfg;
-    if (m.sampler) params.sampler = m.sampler;
-    if (m.scheduler) params.scheduler = m.scheduler;
-    if (m.model) params.model = m.model;
-    if (m.width) params.width = m.width;
-    if (m.height) params.height = m.height;
-    if (m.denoise !== undefined) params.denoise = m.denoise;
-  }
-
   return params;
 }
 
