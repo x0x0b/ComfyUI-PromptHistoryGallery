@@ -143,7 +143,17 @@ class PromptHistoryStorage:
     ) -> Optional[PromptHistoryEntry]:
         """
         Attempt to find an existing entry that matches the provided payload.
+        Ignores 'comfyui_prompt' and 'comfyui_workflow' in metadata when comparing,
+        as these are added post-execution and shouldn't cause duplication.
         """
+        
+        # Helper to strip ignored keys for comparison
+        def _strip_ignored(meta: Dict[str, Any]) -> Dict[str, Any]:
+            return {k: v for k, v in meta.items() if k not in ("comfyui_prompt", "comfyui_workflow")}
+
+        target_metadata = _strip_ignored(metadata)
+        
+        # First try exact match (fast path, though less likely now with ignored keys)
         payload = {
             "prompt": prompt,
             "tags": serialize_tags(tags),
@@ -162,6 +172,7 @@ class PromptHistoryStorage:
         if row is not None:
             return self._row_to_entry(row)
 
+        # Fallback: find by prompt and manually check tags/metadata
         fallback_rows = cursor.execute(
             """
             SELECT id, created_at, last_used_at, prompt, tags, metadata
@@ -172,10 +183,16 @@ class PromptHistoryStorage:
             """,
             (prompt, self._FALLBACK_LOOKUP_LIMIT),
         ).fetchall()
-        for candidate in fallback_rows:
-            entry = self._row_to_entry(candidate)
-            if entry.tags == tags and entry.metadata == metadata:
-                return entry
+        
+        for candidate_row in fallback_rows:
+            candidate_entry = self._row_to_entry(candidate_row)
+            if candidate_entry.tags != tags:
+                continue
+            
+            candidate_metadata = _strip_ignored(candidate_entry.metadata)
+            if candidate_metadata == target_metadata:
+                return candidate_entry
+
         return None
 
     def append(
