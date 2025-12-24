@@ -23,6 +23,8 @@ import {
   resolveComfyApp,
   resolveNodeFromTarget,
   resolvePromptWidget,
+  resolveUpstreamConnection,
+  findFirstFreeStringWidget,
 } from "./lib/comfyBridge.js";
 
 export {};
@@ -1062,7 +1064,7 @@ class HistoryDialog {
       return;
     }
 
-    const node = resolveNodeFromTarget(target);
+    let node = resolveNodeFromTarget(target);
     if (!node) {
       this.state.target = null;
       this._updateTargetLabel();
@@ -1072,8 +1074,49 @@ class HistoryDialog {
       return;
     }
 
-    const widget =
+    let widget =
       node.widgets?.find((item) => item?.name === target.widgetName) ?? resolvePromptWidget(node);
+
+    // --- NEW LOGIC START ---
+    // If the widget is connected to an input, traverse upstream.
+    // We do this in a loop to handle chains of reroutes or similar nodes if needed,
+    // though the requirement says "if the input field is input from another node".
+    // We'll just check one level or traverse until we find a free widget.
+
+    const MAX_TRAVERSAL = 10;
+    let traversalCount = 0;
+
+    while (widget && traversalCount < MAX_TRAVERSAL) {
+      // Check if this widget corresponds to a connected input
+      const input = node.inputs?.find((i) => i.name === widget.name);
+      if (input && input.link) {
+        // It is connected. Find the upstream node.
+        const upstreamNode = resolveUpstreamConnection(node, widget.name);
+        if (upstreamNode) {
+          // Switch focus to the upstream node
+          node = upstreamNode;
+          // Try to find a suitable widget on the new node.
+          // The requirement says: "If the input node has multiple string input fields, try to enter from the top."
+          // "If the input node also has an input field input from another node, ignore that input field and enter the next input field."
+          widget = findFirstFreeStringWidget(node);
+          traversalCount++;
+          if (!widget) {
+            // Upstream node has no free widgets. Stop here? Or keep searching?
+            // For now, if we can't find a free widget on the upstream node, we can't "Use" it there.
+            // We might fall back to copying.
+            break;
+          }
+        } else {
+          // Connected but can't resolve upstream?
+          break;
+        }
+      } else {
+        // Not connected, so this widget is free to use.
+        break;
+      }
+    }
+    // --- NEW LOGIC END ---
+
     if (!widget) {
       await this._copyPrompt(entry);
       this._setMessage(TEXT.copiedMissingWidget, "warn");
@@ -1082,8 +1125,12 @@ class HistoryDialog {
     }
 
     const updated = applyPromptToWidget(node, widget, entry.prompt ?? "");
+    // Update target to point to where we actually sent it, so the UI reflects it?
+    // The requirement doesn't explicitly say we must update the "Sending to: ..." label permanently,
+    // but it's good UX to show where it went.
     this.state.target = normalizeTargetPayload(node) ?? null;
     this._updateTargetLabel();
+
     if (updated) {
       this._setMessage(TEXT.sent(this.state.target?.nodeTitle), "success");
     } else {
