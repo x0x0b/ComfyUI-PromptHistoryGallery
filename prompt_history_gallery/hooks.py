@@ -5,7 +5,11 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Iterable, List, Optional
 
-from .metadata_parser import get_image_path, parse_image_metadata
+from .metadata_parser import (
+    extract_comfyui_parameters,
+    get_image_path,
+    parse_image_metadata,
+)
 from .normalizers import normalize_output_payload
 from .registry import consume_prompt_entries
 from .storage import get_prompt_history_storage
@@ -99,6 +103,10 @@ def _build_metadata_update(
     image_metadata = _extract_metadata_from_files(files)
     if image_metadata:
         metadata_update.update(image_metadata)
+
+    prompt_metadata = extract_comfyui_parameters(prompt_data=prompt_payload)
+    for key, value in prompt_metadata.items():
+        metadata_update.setdefault(key, value)
 
     if prompt_payload and "comfyui_prompt" not in metadata_update:
         metadata_update["comfyui_prompt"] = prompt_payload
