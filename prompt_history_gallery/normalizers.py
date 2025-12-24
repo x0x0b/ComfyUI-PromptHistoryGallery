@@ -3,32 +3,9 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Optional
 
 from .models import OutputRecord
-
-
-def normalize_tags(raw: Any) -> List[str]:
-    """
-    Convert user-provided tags into a clean list of strings.
-    Accepts list/tuple/set or comma/newline separated strings.
-    """
-    if raw is None:
-        return []
-
-    candidates: Iterable[Any]
-    if isinstance(raw, (list, tuple, set)):
-        candidates = raw
-    else:
-        text = str(raw).replace("\n", ",")
-        candidates = text.split(",")
-
-    normalized: List[str] = []
-    for value in candidates:
-        item = str(value).strip()
-        if item:
-            normalized.append(item)
-    return normalized
 
 
 def normalize_metadata(raw: Any) -> Dict[str, Any]:
@@ -70,10 +47,6 @@ def normalize_output_payload(file_info: Any) -> Optional[OutputRecord]:
         return OutputRecord(filename=filename, subfolder=subfolder, type=output_type)
 
     return None
-
-
-def serialize_tags(tags: List[str]) -> str:
-    return json.dumps(tags, ensure_ascii=False)
 
 
 def serialize_metadata(metadata: Dict[str, Any]) -> str:

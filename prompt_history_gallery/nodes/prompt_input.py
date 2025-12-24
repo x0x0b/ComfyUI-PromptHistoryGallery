@@ -9,7 +9,7 @@ from typing import Any, Dict, Optional, Tuple
 
 from comfy_execution.utils import get_executing_context
 
-from ..normalizers import normalize_metadata, normalize_tags
+from ..normalizers import normalize_metadata
 from ..registry import register_prompt_entry
 from ..storage import get_prompt_history_storage
 
@@ -81,10 +81,8 @@ class PromptHistoryInput:
         self,
         clip,
         prompt: str,
-        tags: str = "",
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Tuple[Any]:
-        tags_list = normalize_tags(tags)
         metadata_dict = normalize_metadata(metadata)
         context = get_executing_context()
         prompt_id = context.prompt_id if context else None
@@ -93,7 +91,6 @@ class PromptHistoryInput:
             metadata_dict[_NODE_METADATA_KEY] = node_identifier
         entry, created = self._storage.ensure_entry(
             prompt=prompt,
-            tags=tags_list,
             metadata=metadata_dict,
         )
         if not created:
@@ -109,7 +106,6 @@ class PromptHistoryInput:
         cls,
         clip,
         prompt: str,
-        tags: str = "",
         metadata: Optional[Dict[str, Any]] = None,
     ):
         """

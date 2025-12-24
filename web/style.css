@@ -338,19 +338,6 @@
   margin: 0;
 }
 
-.phg-entry-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.3rem;
-}
-
-.phg-tag {
-  padding: 0.15rem 0.5rem;
-  border-radius: 9999px;
-  background: rgba(255, 255, 255, 0.08);
-  font-size: 0.7rem;
-}
-
 .phg-entry-meta {
   font-size: 0.75rem;
   opacity: 0.8;
@@ -783,12 +770,6 @@
   display: flex;
   flex-wrap: wrap;
   gap: 0.35rem;
-}
-
-.phg-entry-card__tags {
-  display: flex;
-  gap: 0.35rem;
-  flex-wrap: wrap;
 }
 
 .phg-button {

@@ -15,7 +15,6 @@ import {
   formatTimestamp,
   logError,
   logInfo,
-  safeText,
 } from "./lib/dom.js";
 import {
   applyPromptToWidget,
@@ -61,7 +60,7 @@ const TEXT = {
   sectionPreview: "Popup Preview",
   historyLimitLabel: "History Limit",
   historyLimitHint: "Number of prompts to keep in history.",
-  searchPlaceholder: "Search prompts or tags…",
+  searchPlaceholder: "Search prompts…",
   searchModeAnd: "Match all terms (AND)",
   searchModeOr: "Match any term (OR)",
   searchClear: "Clear",
@@ -865,17 +864,6 @@ class HistoryDialog {
     this._comfyShortcutGuard = null;
   }
 
-  _buildTags(tags) {
-    if (!Array.isArray(tags) || !tags.length) return null;
-    const row = createEl("div", "phg-entry-card__tags");
-    for (const tag of tags) {
-      const chip = this._createChip(safeText(tag));
-      chip.classList.add("phg-chip--muted");
-      row.append(chip);
-    }
-    return row;
-  }
-
   _setLoading(value) {
     this.state.loading = Boolean(value);
     this.refreshBtn.disabled = this.state.loading;
@@ -1004,11 +992,7 @@ class HistoryDialog {
     const isOrMode = this.state.searchMode === "or";
     return entries.filter((entry) => {
       const promptText = String(entry.prompt ?? "").toLowerCase();
-      const tags = Array.isArray(entry.tags)
-        ? entry.tags.map((tag) => String(tag ?? "").toLowerCase())
-        : [];
-      const matchesTerm = (term) =>
-        promptText.includes(term) || tags.some((tag) => tag.includes(term));
+      const matchesTerm = (term) => promptText.includes(term);
       return isOrMode ? terms.some(matchesTerm) : terms.every(matchesTerm);
     });
   }
@@ -1063,8 +1047,6 @@ class HistoryDialog {
     body.append(this._buildPreview(preview, entry, sources), this._buildPrompt(entry.prompt));
 
     const metaRow = createEl("div", "phg-entry-card__footer");
-    const tagsRow = this._buildTags(entry.tags);
-    if (tagsRow) metaRow.append(tagsRow);
 
     article.append(header, body, metaRow);
     return article;
@@ -1142,7 +1124,7 @@ class HistoryDialog {
       return;
     }
     try {
-      await this.viewer.open(entry.id ?? null, sources, Math.max(0, startIndex));
+      await this.viewer.open(entry.id ?? null, sources, Math.max(0, startIndex), entry);
     } catch (error) {
       logError(LOGGER, "openGallery error", error);
       this._setMessage("Failed to open gallery.", "error");
@@ -1174,7 +1156,7 @@ function attachUpdateListeners(api, eventBus) {
       }
       const safeIndex = Math.max(0, Math.min(startIndex, sources.length - 1));
       try {
-        const result = dialog.viewer.open(entry?.id ?? null, sources, safeIndex);
+        const result = dialog.viewer.open(entry?.id ?? null, sources, safeIndex, entry);
         return result ?? true;
       } catch (error) {
         logError(LOGGER, "preview openGallery error", error);

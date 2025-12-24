@@ -1,4 +1,5 @@
 import { createAssetLoader } from "./assetLoader.js";
+import { extractMetadata, formatMetadata } from "./metadata.js";
 
 const DEFAULT_ROOT_ID = "phg-viewer-root";
 
@@ -81,7 +82,7 @@ export class ViewerBridge {
     }
   }
 
-  async open(entryId, items, startIndex = 0) {
+  async open(entryId, items, startIndex = 0, entry = null) {
     if (!Array.isArray(items) || items.length === 0) {
       throw new Error("No images available for this entry.");
     }
@@ -122,7 +123,20 @@ export class ViewerBridge {
       url(image) {
         return image?.getAttribute?.("data-original") || image?.src || "";
       },
-      title: [1, (image) => image?.getAttribute?.("data-caption") || image?.alt || ""],
+      title: [
+        1,
+        (image) => {
+          const caption = image?.getAttribute?.("data-caption") || image?.alt || "";
+          if (entry) {
+            const metadata = extractMetadata(entry);
+            const metaString = formatMetadata(metadata);
+            if (metaString) {
+              return caption ? `${caption} (${metaString})` : metaString;
+            }
+          }
+          return caption;
+        },
+      ],
     });
 
     const hiddenHandler = () => this._teardown(true);
