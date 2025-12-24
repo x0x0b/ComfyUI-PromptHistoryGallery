@@ -18,9 +18,7 @@ from .models import OutputRecord, PromptHistoryEntry
 from .normalizers import (
     normalize_metadata,
     normalize_output_payload,
-    normalize_tags,
     serialize_metadata,
-    serialize_tags,
 )
 
 
@@ -86,7 +84,6 @@ class PromptHistoryStorage:
         row: sqlite3.Row,
         files: Sequence[Any] = (),
     ) -> PromptHistoryEntry:
-        tags = json.loads(row["tags"]) if row["tags"] else []
         metadata = json.loads(row["metadata"]) if row["metadata"] else {}
         normalized_files: Tuple[Dict[str, Any], ...] = tuple(
             item.to_dict() if isinstance(item, OutputRecord) else dict(item) for item in files
@@ -95,7 +92,6 @@ class PromptHistoryStorage:
             id=row["id"],
             created_at=row["created_at"],
             prompt=row["prompt"],
-            tags=tags,
             metadata=metadata,
             last_used_at=row["last_used_at"],
             files=normalized_files,
@@ -105,7 +101,6 @@ class PromptHistoryStorage:
         self,
         cursor: sqlite3.Cursor,
         prompt: str,
-        tags: List[str],
         metadata: Dict[str, Any],
     ) -> PromptHistoryEntry:
         now_iso = datetime.now(timezone.utc).isoformat()
@@ -113,7 +108,6 @@ class PromptHistoryStorage:
             id=str(uuid.uuid4()),
             created_at=now_iso,
             prompt=prompt,
-            tags=list(tags),
             metadata=metadata.copy(),
             last_used_at=now_iso,
             files=tuple(),
@@ -128,7 +122,7 @@ class PromptHistoryStorage:
                 "created_at": entry.created_at,
                 "last_used_at": entry.last_used_at,
                 "prompt": entry.prompt,
-                "tags": serialize_tags(entry.tags),
+                "tags": "[]",  # Legacy column
                 "metadata": serialize_metadata(entry.metadata),
             },
         )
@@ -138,7 +132,6 @@ class PromptHistoryStorage:
         self,
         cursor: sqlite3.Cursor,
         prompt: str,
-        tags: List[str],
         metadata: Dict[str, Any],
     ) -> Optional[PromptHistoryEntry]:
         """
@@ -156,14 +149,14 @@ class PromptHistoryStorage:
         # First try exact match (fast path, though less likely now with ignored keys)
         payload = {
             "prompt": prompt,
-            "tags": serialize_tags(tags),
             "metadata": serialize_metadata(metadata),
         }
+        # Note: We ignore tags in search now
         row = cursor.execute(
             """
             SELECT id, created_at, last_used_at, prompt, tags, metadata
             FROM prompt_history
-            WHERE prompt = :prompt AND tags = :tags AND metadata = :metadata
+            WHERE prompt = :prompt AND metadata = :metadata
             ORDER BY last_used_at DESC
             LIMIT 1
             """,
@@ -172,7 +165,7 @@ class PromptHistoryStorage:
         if row is not None:
             return self._row_to_entry(row)
 
-        # Fallback: find by prompt and manually check tags/metadata
+        # Fallback: find by prompt and manually check metadata
         fallback_rows = cursor.execute(
             """
             SELECT id, created_at, last_used_at, prompt, tags, metadata
@@ -186,8 +179,6 @@ class PromptHistoryStorage:
         
         for candidate_row in fallback_rows:
             candidate_entry = self._row_to_entry(candidate_row)
-            if candidate_entry.tags != tags:
-                continue
             
             candidate_metadata = _strip_ignored(candidate_entry.metadata)
             if candidate_metadata == target_metadata:
@@ -199,17 +190,14 @@ class PromptHistoryStorage:
         self,
         prompt: str,
         *,
-        tags: List[str],
         metadata: Optional[Dict[str, Any]] = None,
     ) -> PromptHistoryEntry:
         """Persist a new entry for the provided prompt text."""
-        incoming_tags = normalize_tags(tags)
         incoming_metadata = normalize_metadata(metadata)
         with self._locked_cursor(commit=True) as cursor:
             entry = self._create_entry_locked(
                 cursor,
                 prompt,
-                incoming_tags,
                 incoming_metadata,
             )
         return entry
@@ -218,20 +206,18 @@ class PromptHistoryStorage:
         self,
         prompt: str,
         *,
-        tags: List[str],
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Tuple[PromptHistoryEntry, bool]:
         """
         Retrieve an existing entry that matches the provided payload, or create one.
         Returns the entry and a flag indicating whether it was newly created.
         """
-        incoming_tags = normalize_tags(tags)
         incoming_metadata = normalize_metadata(metadata)
         with self._locked_cursor(commit=True) as cursor:
-            existing = self._find_entry_locked(cursor, prompt, incoming_tags, incoming_metadata)
+            existing = self._find_entry_locked(cursor, prompt, incoming_metadata)
             if existing is not None:
                 return existing, False
-            entry = self._create_entry_locked(cursor, prompt, incoming_tags, incoming_metadata)
+            entry = self._create_entry_locked(cursor, prompt, incoming_metadata)
             return entry, True
 
     def update_metadata(self, entry_id: str, metadata_update: Dict[str, Any]) -> None:
