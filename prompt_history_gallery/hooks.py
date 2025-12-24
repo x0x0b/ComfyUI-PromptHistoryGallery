@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
+from .metadata_parser import get_image_path, parse_image_metadata
 from .normalizers import normalize_output_payload
 from .registry import consume_prompt_entries
 from .storage import get_prompt_history_storage
@@ -61,6 +62,50 @@ def _extract_prompt_texts(prompt_payload: Any) -> List[str]:
     return prompts
 
 
+def _extract_metadata_from_files(files: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
+    for file_info in files:
+        if not isinstance(file_info, dict):
+            continue
+
+        filename = file_info.get("filename")
+        if not filename or not isinstance(filename, str):
+            continue
+
+        subfolder = str(file_info.get("subfolder") or "")
+        folder_type = str(file_info.get("type") or "")
+
+        candidate_types = []
+        if folder_type:
+            candidate_types.append(folder_type)
+        for fallback in ("output", "temp", "input"):
+            if fallback not in candidate_types:
+                candidate_types.append(fallback)
+
+        for candidate in candidate_types:
+            image_path = get_image_path(filename, subfolder, candidate)
+            if not image_path:
+                continue
+            metadata = parse_image_metadata(image_path)
+            if metadata:
+                return metadata
+
+    return {}
+
+
+def _build_metadata_update(
+    prompt_payload: Any, files: Iterable[Dict[str, Any]]
+) -> Dict[str, Any]:
+    metadata_update: Dict[str, Any] = {}
+    image_metadata = _extract_metadata_from_files(files)
+    if image_metadata:
+        metadata_update.update(image_metadata)
+
+    if prompt_payload and "comfyui_prompt" not in metadata_update:
+        metadata_update["comfyui_prompt"] = prompt_payload
+
+    return metadata_update
+
+
 def _resolve_entry_ids(
     prompt_id: Optional[str],
     prompt_payload: Any,
@@ -107,14 +152,14 @@ def handle_prompt_completion(
     if not entry_ids:
         return
 
-    # Store the full prompt payload in metadata for later use
-    if prompt_payload:
-        for entry_id in entry_ids:
-            storage.update_metadata(entry_id, {"comfyui_prompt": prompt_payload})
-
     files = _extract_generated_files(history_result)
     if files:
         storage.add_outputs_for_entries(entry_ids, files)
+
+    metadata_update = _build_metadata_update(prompt_payload, files)
+    if metadata_update:
+        for entry_id in entry_ids:
+            storage.update_metadata(entry_id, metadata_update)
 
     storage.touch_entries(entry_ids)
     _notify_clients(server, entry_ids, files)
