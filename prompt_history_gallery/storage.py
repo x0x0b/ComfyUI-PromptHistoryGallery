@@ -217,6 +217,34 @@ class PromptHistoryStorage:
             entry = self._create_entry_locked(cursor, prompt, incoming_tags, incoming_metadata)
             return entry, True
 
+    def update_metadata(self, entry_id: str, metadata_update: Dict[str, Any]) -> None:
+        """
+        Update the metadata of an existing entry.
+        """
+        if not entry_id or not metadata_update:
+            return
+
+        with self._locked_cursor(commit=True) as cursor:
+            row = cursor.execute(
+                "SELECT metadata FROM prompt_history WHERE id = ?", (entry_id,)
+            ).fetchone()
+            if not row:
+                return
+
+            current_metadata = json.loads(row["metadata"]) if row["metadata"] else {}
+            # Only update if there are changes
+            changed = False
+            for k, v in metadata_update.items():
+                if current_metadata.get(k) != v:
+                    current_metadata[k] = v
+                    changed = True
+            
+            if changed:
+                cursor.execute(
+                    "UPDATE prompt_history SET metadata = ? WHERE id = ?",
+                    (serialize_metadata(current_metadata), entry_id),
+                )
+
     def list(self, limit: Optional[int] = None) -> List[PromptHistoryEntry]:
         """
         Return stored entries ordered by creation date descending.

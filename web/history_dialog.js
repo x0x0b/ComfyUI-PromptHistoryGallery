@@ -1142,7 +1142,7 @@ class HistoryDialog {
       return;
     }
     try {
-      await this.viewer.open(entry.id ?? null, sources, Math.max(0, startIndex));
+      await this.viewer.open(entry.id ?? null, sources, Math.max(0, startIndex), entry);
     } catch (error) {
       logError(LOGGER, "openGallery error", error);
       this._setMessage("Failed to open gallery.", "error");
@@ -1174,7 +1174,7 @@ function attachUpdateListeners(api, eventBus) {
       }
       const safeIndex = Math.max(0, Math.min(startIndex, sources.length - 1));
       try {
-        const result = dialog.viewer.open(entry?.id ?? null, sources, safeIndex);
+        const result = dialog.viewer.open(entry?.id ?? null, sources, safeIndex, entry);
         return result ?? true;
       } catch (error) {
         logError(LOGGER, "preview openGallery error", error);

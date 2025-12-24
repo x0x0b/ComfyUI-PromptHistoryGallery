@@ -107,6 +107,11 @@ def handle_prompt_completion(
     if not entry_ids:
         return
 
+    # Store the full prompt payload in metadata for later use
+    if prompt_payload:
+        for entry_id in entry_ids:
+            storage.update_metadata(entry_id, {"comfyui_prompt": prompt_payload})
+
     files = _extract_generated_files(history_result)
     if files:
         storage.add_outputs_for_entries(entry_ids, files)
