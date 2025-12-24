@@ -67,6 +67,46 @@ export function resolveNodeFromTarget(target, logger = console) {
   return node ?? null;
 }
 
+export function resolveUpstreamConnection(node, inputName) {
+  if (!node || !node.inputs) return null;
+  const input = node.inputs.find((i) => i.name === inputName);
+  if (!input || !input.link) return null;
+
+  const graph = node.graph;
+  if (!graph || !graph.links) return null;
+
+  const link = graph.links[input.link];
+  if (!link) return null;
+
+  return graph.getNodeById(link.origin_id) ?? null;
+}
+
+export function findFirstFreeStringWidget(node) {
+  if (!node || !node.widgets) return null;
+
+  for (const widget of node.widgets) {
+    // Basic type check to skip buttons, toggles, etc.
+    if (widget.type === "button" || widget.type === "toggle") continue;
+
+    // Skip combos (usually have options.values)
+    if (widget.type === "combo" || (widget.options && Array.isArray(widget.options.values)))
+      continue;
+
+    // Must hold a string
+    if (typeof widget.value !== "string") continue;
+
+    // Check if connected
+    // Note: In LiteGraph, if a widget is converted to input, the input name matches the widget name.
+    const input = node.inputs?.find((i) => i.name === widget.name);
+    if (input && input.link) {
+      continue; // Connected to another node
+    }
+
+    return widget;
+  }
+  return null;
+}
+
 export function applyPromptToWidget(node, widget, promptText, comfyApp = resolveComfyApp()) {
   if (!node || !widget) return false;
   const normalized = typeof promptText === "string" ? promptText : String(promptText ?? "");
