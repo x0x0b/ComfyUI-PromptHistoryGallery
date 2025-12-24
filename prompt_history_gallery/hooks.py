@@ -34,6 +34,13 @@ def _extract_generated_files(history_result: Any) -> List[Dict[str, Any]]:
                 if record:
                     collected.append(record.to_dict())
 
+    # Heuristic: If we have any "output" (saved) images, ignore "temp" (preview) images.
+    # This prevents intermediate controlnet previews from cluttering the history
+    # when a real save node is present.
+    has_saved_output = any(item.get("type") == "output" for item in collected)
+    if has_saved_output:
+        collected = [item for item in collected if item.get("type") == "output"]
+
     return collected
 
 
