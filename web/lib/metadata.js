@@ -1,119 +1,122 @@
-
 export function extractMetadata(entry) {
   if (!entry) return {};
-  
+
   const params = {};
-  
+
   let promptData = null;
-  
+
   if (entry.metadata) {
-      if (entry.metadata.comfyui_prompt) {
-          promptData = entry.metadata.comfyui_prompt;
-      } else if (entry.metadata.prompt) {
-           try {
-               promptData = typeof entry.metadata.prompt === 'string' 
-                   ? JSON.parse(entry.metadata.prompt) 
-                   : entry.metadata.prompt;
-           } catch (e) {}
-      }
-      
-      let workflowData = null;
-      if (entry.metadata.comfyui_workflow) {
-          workflowData = entry.metadata.comfyui_workflow;
-      } else if (entry.metadata.workflow) {
-           try {
-               workflowData = typeof entry.metadata.workflow === 'string' 
-                   ? JSON.parse(entry.metadata.workflow) 
-                   : entry.metadata.workflow;
-           } catch (e) {}
-      }
-      
-      if (workflowData) {
-          extractFromWorkflow(workflowData, params);
-      }
+    if (entry.metadata.comfyui_prompt) {
+      promptData = entry.metadata.comfyui_prompt;
+    } else if (entry.metadata.prompt) {
+      try {
+        promptData =
+          typeof entry.metadata.prompt === "string"
+            ? JSON.parse(entry.metadata.prompt)
+            : entry.metadata.prompt;
+      } catch (e) {}
+    }
+
+    let workflowData = null;
+    if (entry.metadata.comfyui_workflow) {
+      workflowData = entry.metadata.comfyui_workflow;
+    } else if (entry.metadata.workflow) {
+      try {
+        workflowData =
+          typeof entry.metadata.workflow === "string"
+            ? JSON.parse(entry.metadata.workflow)
+            : entry.metadata.workflow;
+      } catch (e) {}
+    }
+
+    if (workflowData) {
+      extractFromWorkflow(workflowData, params);
+    }
   }
 
   if (promptData) {
-      extractFromPrompt(promptData, params);
+    extractFromPrompt(promptData, params);
   }
 
   return params;
 }
 
 function extractFromWorkflow(workflow, params) {
-    if (!workflow || !workflow.nodes) return;
-    
-    for (const node of workflow.nodes) {
-        const type = node.type;
-        const widgets = node.widgets_values;
-        
-        if (!widgets) continue;
+  if (!workflow || !workflow.nodes) return;
 
-        if (["KSampler", "KSamplerAdvanced"].includes(type)) {
-            if (widgets.length >= 4) {
-                if (typeof widgets[0] === 'number') params.seed = widgets[0];
-                if (typeof widgets[1] === 'number') params.steps = widgets[1];
-                if (typeof widgets[2] === 'number') params.cfg = widgets[2];
-                if (typeof widgets[3] === 'string') params.sampler = widgets[3];
-                if (widgets.length > 4 && typeof widgets[4] === 'string') params.scheduler = widgets[4];
-            }
-        } else if (type === "CheckpointLoaderSimple") {
-            if (widgets[0] && typeof widgets[0] === 'string') params.model = widgets[0];
-        } else if (type === "CheckpointLoader") {
-             // CheckpointLoader has config_name at 0, ckpt_name at 1
-             if (widgets[1] && typeof widgets[1] === 'string') params.model = widgets[1];
-        } else if (type === "EmptyLatentImage") {
-             if (widgets.length >= 2) {
-                 if (typeof widgets[0] === 'number') params.width = widgets[0];
-                 if (typeof widgets[1] === 'number') params.height = widgets[1];
-             }
-        } else if (type === "CLIPTextEncode") {
-             if (widgets[0] && typeof widgets[0] === 'string') {
-                 const text = widgets[0];
-                 if (!params.prompt) {
-                     params.prompt = text;
-                 } else if (text !== params.prompt) {
-                     params.negative_prompt = text;
-                 }
-             }
+  for (const node of workflow.nodes) {
+    const type = node.type;
+    const widgets = node.widgets_values;
+
+    if (!widgets) continue;
+
+    if (["KSampler", "KSamplerAdvanced"].includes(type)) {
+      if (widgets.length >= 4) {
+        if (typeof widgets[0] === "number") params.seed = widgets[0];
+        if (typeof widgets[1] === "number") params.steps = widgets[1];
+        if (typeof widgets[2] === "number") params.cfg = widgets[2];
+        if (typeof widgets[3] === "string") params.sampler = widgets[3];
+        if (widgets.length > 4 && typeof widgets[4] === "string") params.scheduler = widgets[4];
+      }
+    } else if (type === "CheckpointLoaderSimple") {
+      if (widgets[0] && typeof widgets[0] === "string") params.model = widgets[0];
+    } else if (type === "CheckpointLoader") {
+      // CheckpointLoader has config_name at 0, ckpt_name at 1
+      if (widgets[1] && typeof widgets[1] === "string") params.model = widgets[1];
+    } else if (type === "EmptyLatentImage") {
+      if (widgets.length >= 2) {
+        if (typeof widgets[0] === "number") params.width = widgets[0];
+        if (typeof widgets[1] === "number") params.height = widgets[1];
+      }
+    } else if (type === "CLIPTextEncode") {
+      if (widgets[0] && typeof widgets[0] === "string") {
+        const text = widgets[0];
+        if (!params.prompt) {
+          params.prompt = text;
+        } else if (text !== params.prompt) {
+          params.negative_prompt = text;
         }
+      }
     }
+  }
 }
 
 function extractFromPrompt(prompt, params) {
-    if (!prompt) return;
-    
-    for (const key of Object.keys(prompt)) {
-        const node = prompt[key];
-        if (!node) continue;
+  if (!prompt) return;
 
-        const classType = node.class_type;
-        const inputs = node.inputs || {};
+  for (const key of Object.keys(prompt)) {
+    const node = prompt[key];
+    if (!node) continue;
 
-        if (classType === "CheckpointLoaderSimple" || classType === "CheckpointLoader") {
-            if (inputs.ckpt_name && typeof inputs.ckpt_name === 'string') params.model = inputs.ckpt_name;
-        } else if (["KSampler", "KSamplerAdvanced"].includes(classType)) {
-            if (typeof inputs.seed === 'number' || typeof inputs.seed === 'string') params.seed = inputs.seed;
-            if (typeof inputs.steps === 'number') params.steps = inputs.steps;
-            if (typeof inputs.cfg === 'number') params.cfg = inputs.cfg;
-            if (typeof inputs.sampler_name === 'string') params.sampler = inputs.sampler_name;
-            if (typeof inputs.scheduler === 'string') params.scheduler = inputs.scheduler;
-            if (typeof inputs.denoise === 'number' && inputs.denoise !== 1.0) params.denoise = inputs.denoise;
-        } else if (classType === "EmptyLatentImage") {
-            if (typeof inputs.width === 'number') params.width = inputs.width;
-            if (typeof inputs.height === 'number') params.height = inputs.height;
-            if (typeof inputs.batch_size === 'number') params.batch_size = inputs.batch_size;
-        } else if (classType === "CLIPTextEncode") {
-            if (inputs.text && typeof inputs.text === 'string') {
-                 const text = inputs.text;
-                 if (!params.prompt) {
-                     params.prompt = text;
-                 } else if (text !== params.prompt) {
-                     params.negative_prompt = text;
-                 }
-            }
+    const classType = node.class_type;
+    const inputs = node.inputs || {};
+
+    if (classType === "CheckpointLoaderSimple" || classType === "CheckpointLoader") {
+      if (inputs.ckpt_name && typeof inputs.ckpt_name === "string") params.model = inputs.ckpt_name;
+    } else if (["KSampler", "KSamplerAdvanced"].includes(classType)) {
+      if (typeof inputs.seed === "number" || typeof inputs.seed === "string")
+        params.seed = inputs.seed;
+      if (typeof inputs.steps === "number") params.steps = inputs.steps;
+      if (typeof inputs.cfg === "number") params.cfg = inputs.cfg;
+      if (typeof inputs.sampler_name === "string") params.sampler = inputs.sampler_name;
+      if (typeof inputs.scheduler === "string") params.scheduler = inputs.scheduler;
+      if (typeof inputs.denoise === "number" && inputs.denoise !== 1.0)
+        params.denoise = inputs.denoise;
+    } else if (classType === "EmptyLatentImage") {
+      if (typeof inputs.width === "number") params.width = inputs.width;
+      if (typeof inputs.height === "number") params.height = inputs.height;
+      if (typeof inputs.batch_size === "number") params.batch_size = inputs.batch_size;
+    } else if (classType === "CLIPTextEncode") {
+      if (inputs.text && typeof inputs.text === "string") {
+        const text = inputs.text;
+        if (!params.prompt) {
+          params.prompt = text;
+        } else if (text !== params.prompt) {
+          params.negative_prompt = text;
         }
+      }
     }
+  }
 }
 
 export function formatMetadata(params) {

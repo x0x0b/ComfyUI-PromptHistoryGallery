@@ -139,13 +139,15 @@ class PromptHistoryStorage:
         Ignores 'comfyui_prompt' and 'comfyui_workflow' in metadata when comparing,
         as these are added post-execution and shouldn't cause duplication.
         """
-        
+
         # Helper to strip ignored keys for comparison
         def _strip_ignored(meta: Dict[str, Any]) -> Dict[str, Any]:
-            return {k: v for k, v in meta.items() if k not in ("comfyui_prompt", "comfyui_workflow")}
+            return {
+                k: v for k, v in meta.items() if k not in ("comfyui_prompt", "comfyui_workflow")
+            }
 
         target_metadata = _strip_ignored(metadata)
-        
+
         # First try exact match (fast path, though less likely now with ignored keys)
         payload = {
             "prompt": prompt,
@@ -176,10 +178,10 @@ class PromptHistoryStorage:
             """,
             (prompt, self._FALLBACK_LOOKUP_LIMIT),
         ).fetchall()
-        
+
         for candidate_row in fallback_rows:
             candidate_entry = self._row_to_entry(candidate_row)
-            
+
             candidate_metadata = _strip_ignored(candidate_entry.metadata)
             if candidate_metadata == target_metadata:
                 return candidate_entry
@@ -241,7 +243,7 @@ class PromptHistoryStorage:
                 if current_metadata.get(k) != v:
                     current_metadata[k] = v
                     changed = True
-            
+
             if changed:
                 cursor.execute(
                     "UPDATE prompt_history SET metadata = ? WHERE id = ?",

@@ -123,17 +123,20 @@ export class ViewerBridge {
       url(image) {
         return image?.getAttribute?.("data-original") || image?.src || "";
       },
-      title: [1, (image) => {
-        const caption = image?.getAttribute?.("data-caption") || image?.alt || "";
-        if (entry) {
-          const metadata = extractMetadata(entry);
-          const metaString = formatMetadata(metadata);
-          if (metaString) {
-            return caption ? `${caption} (${metaString})` : metaString;
+      title: [
+        1,
+        (image) => {
+          const caption = image?.getAttribute?.("data-caption") || image?.alt || "";
+          if (entry) {
+            const metadata = extractMetadata(entry);
+            const metaString = formatMetadata(metadata);
+            if (metaString) {
+              return caption ? `${caption} (${metaString})` : metaString;
+            }
           }
-        }
-        return caption;
-      }],
+          return caption;
+        },
+      ],
     });
 
     const hiddenHandler = () => this._teardown(true);
