@@ -8,7 +8,7 @@ from typing import Any, Dict
 
 def serialize_metadata(metadata: Dict[str, Any]) -> str:
     """Serialize metadata dict to JSON for storage."""
-    return json.dumps(metadata, ensure_ascii=False)
+    return json.dumps(metadata, ensure_ascii=False, sort_keys=True)
 
 
 def deserialize_metadata(raw: Any) -> Dict[str, Any]:

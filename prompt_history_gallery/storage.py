@@ -128,7 +128,7 @@ class PromptHistoryStorage:
         # Note: We ignore tags in search now
         row = cursor.execute(
             """
-            SELECT id, created_at, last_used_at, prompt, tags, metadata
+            SELECT id, created_at, last_used_at, prompt, metadata
             FROM prompt_history
             WHERE prompt = :prompt AND metadata = :metadata
             ORDER BY last_used_at DESC
@@ -142,7 +142,7 @@ class PromptHistoryStorage:
         # Fallback: find by prompt and manually check metadata
         fallback_rows = cursor.execute(
             """
-            SELECT id, created_at, last_used_at, prompt, tags, metadata
+            SELECT id, created_at, last_used_at, prompt, metadata
             FROM prompt_history
             WHERE prompt = ?
             ORDER BY last_used_at DESC, created_at DESC
@@ -225,9 +225,9 @@ class PromptHistoryStorage:
         Return stored entries grouped by prompt text, ordered by recent use.
         """
         sql = (
-            "SELECT id, created_at, last_used_at, prompt, tags, metadata "
+            "SELECT id, created_at, last_used_at, prompt, metadata "
             "FROM ("
-            "SELECT id, created_at, last_used_at, prompt, tags, metadata, "
+            "SELECT id, created_at, last_used_at, prompt, metadata, "
             "ROW_NUMBER() OVER ("
             "PARTITION BY prompt "
             "ORDER BY last_used_at DESC, created_at DESC, id DESC"
