@@ -7,6 +7,7 @@ from typing import Any, Dict, Sequence, Tuple
 
 from .serialization import deserialize_metadata
 
+
 @dataclass(frozen=True)
 class PromptHistoryEntry:
     """Serializable prompt history item."""
