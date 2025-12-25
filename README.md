@@ -28,7 +28,7 @@ The node executes on every graph run so repeated prompts are captured. Each exec
 <img width="500" alt="Screenshot of prompt history window" src="https://github.com/user-attachments/assets/9d3e3633-ed31-48b6-8cf8-7c40a4b73c34" /><br>
 <img width="500" alt="Screenshot of image preview" src="https://github.com/user-attachments/assets/2e1a971f-dfa1-4b3b-84fa-a7beceadcdaf" />
 
-- Each `Prompt History Input` node includes a `History` button. Clicking it opens a dialog with recent entries sorted by recent use.
+- Each `Prompt History Input` node includes a `History` button. Clicking it opens a dialog with recent prompts grouped by text and sorted by recent use.
 - Search by prompt text or tags. Entries show the latest preview, image count, and tags when available.
 - Actions: send the prompt back to the selected node (falls back to copy if no node is active), copy, delete, and open the full gallery.
 - The dialog refreshes when new prompts finish so it stays in sync with the latest generations.

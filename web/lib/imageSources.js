@@ -55,6 +55,11 @@ function normalizeDescriptor(candidate, { allowMissingExtension = false } = {}) 
     filename: String(filename),
   };
 
+  const entryId = candidate.entry_id ?? candidate.entryId ?? candidate.source_entry_id;
+  if (entryId) {
+    record.entryId = String(entryId);
+  }
+
   if (candidate.subfolder) {
     record.subfolder = String(candidate.subfolder);
   }
@@ -115,6 +120,7 @@ function appendFromCollection(result, seen, collection, { allowMissingExtension 
       params,
       title: descriptor.title ? String(descriptor.title) : descriptor.filename,
       thumbHint: descriptor.thumbnail ?? null,
+      entryId: descriptor.entryId ?? null,
     });
   }
 }
@@ -170,6 +176,7 @@ export function buildImageSources(entry, api) {
       url,
       thumb,
       title: item.title,
+      entryId: item.entryId ?? null,
     };
   });
 }
