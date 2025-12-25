@@ -240,11 +240,20 @@ class PromptHistoryStorage:
 
     def list(self, limit: Optional[int] = None) -> List[PromptHistoryEntry]:
         """
-        Return stored entries ordered by creation date descending.
+        Return stored entries grouped by prompt text, ordered by recent use.
         """
         sql = (
             "SELECT id, created_at, last_used_at, prompt, tags, metadata "
-            "FROM prompt_history ORDER BY last_used_at DESC, created_at DESC"
+            "FROM ("
+            "SELECT id, created_at, last_used_at, prompt, tags, metadata, "
+            "ROW_NUMBER() OVER ("
+            "PARTITION BY prompt "
+            "ORDER BY last_used_at DESC, created_at DESC, id DESC"
+            ") AS row_rank "
+            "FROM prompt_history"
+            ") "
+            "WHERE row_rank = 1 "
+            "ORDER BY last_used_at DESC, created_at DESC"
         )
         if limit is not None:
             sql += " LIMIT ?"
@@ -253,12 +262,36 @@ class PromptHistoryStorage:
             params = ()
         with self._locked_cursor() as cursor:
             rows = cursor.execute(sql, params).fetchall()
-            entry_ids = [row["id"] for row in rows]
-            outputs_map = self._fetch_outputs(cursor, entry_ids) if entry_ids else {}
+            prompts = [row["prompt"] for row in rows]
+            outputs_map = self._fetch_outputs_by_prompt(cursor, prompts) if prompts else {}
+            entry_ids = {
+                record.get("entry_id")
+                for records in outputs_map.values()
+                for record in records
+                if isinstance(record, dict) and record.get("entry_id")
+            }
+            metadata_map = (
+                self._fetch_metadata_by_entry_ids(cursor, sorted(entry_ids))
+                if entry_ids
+                else {}
+            )
         entries: List[PromptHistoryEntry] = []
         for row in rows:
-            files = tuple(outputs_map.get(row["id"], []))
-            entries.append(self._row_to_entry(row, files))
+            files = tuple(outputs_map.get(row["prompt"], []))
+            entry = self._row_to_entry(row, files)
+            if metadata_map and files:
+                prompt_entry_ids = {
+                    record.get("entry_id")
+                    for record in files
+                    if isinstance(record, dict) and record.get("entry_id")
+                }
+                if prompt_entry_ids:
+                    entry.metadata["_phg_entry_metadata"] = {
+                        entry_id: metadata_map[entry_id]
+                        for entry_id in prompt_entry_ids
+                        if entry_id in metadata_map
+                    }
+            entries.append(entry)
         return entries
 
     def add_outputs_for_entries(
@@ -319,7 +352,7 @@ class PromptHistoryStorage:
         sql = (
             "SELECT prompt, id FROM prompt_history WHERE prompt IN ("
             + placeholders
-            + ") ORDER BY created_at DESC"
+            + ") ORDER BY last_used_at DESC, created_at DESC"
         )
 
         with self._locked_cursor() as cursor:
@@ -362,16 +395,76 @@ class PromptHistoryStorage:
 
         return outputs
 
+    def _fetch_outputs_by_prompt(
+        self, cursor: sqlite3.Cursor, prompts: Sequence[str]
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        if not prompts:
+            return {}
+
+        outputs: Dict[str, List[OutputRecord]] = {prompt: [] for prompt in prompts}
+        chunk_size = 900
+
+        for idx in range(0, len(prompts), chunk_size):
+            chunk = prompts[idx : idx + chunk_size]
+            placeholders = ",".join(["?"] * len(chunk))
+            sql = (
+                "SELECT p.prompt, o.entry_id, o.filename, o.subfolder, o.type "
+                "FROM prompt_history_output o "
+                "JOIN prompt_history p ON p.id = o.entry_id "
+                f"WHERE p.prompt IN ({placeholders}) ORDER BY o.id"
+            )
+            rows = cursor.execute(sql, tuple(chunk)).fetchall()
+            for row in rows:
+                prompt = row["prompt"]
+                record: Dict[str, Any] = {"filename": row["filename"]}
+                if row["subfolder"]:
+                    record["subfolder"] = row["subfolder"]
+                if row["type"]:
+                    record["type"] = row["type"]
+                if row["entry_id"]:
+                    record["entry_id"] = row["entry_id"]
+                outputs.setdefault(prompt, []).append(record)
+
+        return outputs
+
+    def _fetch_metadata_by_entry_ids(
+        self, cursor: sqlite3.Cursor, entry_ids: Sequence[str]
+    ) -> Dict[str, Dict[str, Any]]:
+        if not entry_ids:
+            return {}
+
+        metadata_map: Dict[str, Dict[str, Any]] = {}
+        chunk_size = 900
+
+        for idx in range(0, len(entry_ids), chunk_size):
+            chunk = entry_ids[idx : idx + chunk_size]
+            placeholders = ",".join(["?"] * len(chunk))
+            sql = f"SELECT id, metadata FROM prompt_history WHERE id IN ({placeholders})"
+            rows = cursor.execute(sql, tuple(chunk)).fetchall()
+            for row in rows:
+                metadata_raw = row["metadata"]
+                if isinstance(metadata_raw, str):
+                    metadata = json.loads(metadata_raw) if metadata_raw else {}
+                elif isinstance(metadata_raw, dict):
+                    metadata = dict(metadata_raw)
+                else:
+                    metadata = {}
+                metadata_map[row["id"]] = metadata
+
+        return metadata_map
+
     def delete(self, entry_id: str) -> bool:
         """
-        Delete a single entry by id. Returns True if a row was removed.
+        Delete all entries matching the prompt for the supplied entry id.
+        Returns True if any rows were removed.
         """
         with self._locked_cursor(commit=True) as cursor:
-            cursor.execute(
-                "DELETE FROM prompt_history_output WHERE entry_id = ?",
-                (entry_id,),
-            )
-            cursor.execute("DELETE FROM prompt_history WHERE id = ?", (entry_id,))
+            row = cursor.execute(
+                "SELECT prompt FROM prompt_history WHERE id = ?", (entry_id,)
+            ).fetchone()
+            if not row:
+                return False
+            cursor.execute("DELETE FROM prompt_history WHERE prompt = ?", (row["prompt"],))
             return cursor.rowcount > 0
 
     def clear(self) -> None:

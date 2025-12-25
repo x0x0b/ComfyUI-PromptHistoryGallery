@@ -92,14 +92,34 @@ export class ViewerBridge {
     const root = this.ensureRoot();
     root.innerHTML = "";
 
+    const metadataByEntryId =
+      entry?.metadata && typeof entry.metadata === "object"
+        ? entry.metadata._phg_entry_metadata ?? null
+        : null;
+    const fallbackMetaString = entry
+      ? formatMetadata(extractMetadata(entry))
+      : "";
+
     const fragment = document.createDocumentFragment();
     items.forEach((item, index) => {
+      let metaString = fallbackMetaString;
+      if (metadataByEntryId && item?.entryId && metadataByEntryId[item.entryId]) {
+        metaString = formatMetadata(
+          extractMetadata({ metadata: metadataByEntryId[item.entryId] })
+        );
+      }
       const image = document.createElement("img");
       image.src = item.thumb ?? item.url;
       image.setAttribute("data-original", item.url);
       image.alt = item.title ?? "";
       if (item.title) {
         image.setAttribute("data-caption", item.title);
+      }
+      if (item?.entryId) {
+        image.dataset.entryId = String(item.entryId);
+      }
+      if (metaString) {
+        image.setAttribute("data-meta", metaString);
       }
       image.loading = "lazy";
       image.dataset.index = String(index);
@@ -119,6 +139,17 @@ export class ViewerBridge {
       transition: false,
       fullscreen: true,
       keyboard: true,
+      inheritedAttributes: [
+        "crossOrigin",
+        "decoding",
+        "isMap",
+        "loading",
+        "referrerPolicy",
+        "sizes",
+        "srcset",
+        "useMap",
+        "data-meta",
+      ],
       initialViewIndex: Math.min(Math.max(startIndex || 0, 0), items.length - 1),
       url(image) {
         return image?.getAttribute?.("data-original") || image?.src || "";
@@ -127,12 +158,9 @@ export class ViewerBridge {
         1,
         (image) => {
           const caption = image?.getAttribute?.("data-caption") || image?.alt || "";
-          if (entry) {
-            const metadata = extractMetadata(entry);
-            const metaString = formatMetadata(metadata);
-            if (metaString) {
-              return caption ? `${caption} (${metaString})` : metaString;
-            }
+          const metaString = image?.getAttribute?.("data-meta") || "";
+          if (metaString) {
+            return caption ? `${caption} (${metaString})` : metaString;
           }
           return caption;
         },

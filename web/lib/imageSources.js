@@ -55,6 +55,11 @@ function normalizeDescriptor(candidate, { allowMissingExtension = false } = {}) 
     filename: String(filename),
   };
 
+  const entryId = candidate.entry_id ?? candidate.entryId ?? candidate.source_entry_id;
+  if (entryId) {
+    record.entryId = String(entryId);
+  }
+
   if (candidate.subfolder) {
     record.subfolder = String(candidate.subfolder);
   }
@@ -95,10 +100,10 @@ function appendFromCollection(result, seen, collection, { allowMissingExtension 
     });
     if (!descriptor) continue;
 
-    const params = {
-      filename: descriptor.filename,
-      type: descriptor.type ? String(descriptor.type) : "output",
-    };
+  const params = {
+    filename: descriptor.filename,
+    type: descriptor.type ? String(descriptor.type) : "output",
+  };
     if (descriptor.subfolder) {
       params.subfolder = descriptor.subfolder;
     }
@@ -111,12 +116,13 @@ function appendFromCollection(result, seen, collection, { allowMissingExtension 
     if (seen.has(key)) continue;
     seen.add(key);
 
-    result.push({
-      params,
-      title: descriptor.title ? String(descriptor.title) : descriptor.filename,
-      thumbHint: descriptor.thumbnail ?? null,
-    });
-  }
+  result.push({
+    params,
+    title: descriptor.title ? String(descriptor.title) : descriptor.filename,
+    thumbHint: descriptor.thumbnail ?? null,
+    entryId: descriptor.entryId ?? null,
+  });
+}
 }
 
 function collectMetadataCollections(entry) {
@@ -170,6 +176,7 @@ export function buildImageSources(entry, api) {
       url,
       thumb,
       title: item.title,
+      entryId: item.entryId ?? null,
     };
   });
 }
