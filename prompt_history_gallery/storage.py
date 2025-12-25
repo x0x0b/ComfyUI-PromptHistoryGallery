@@ -4,7 +4,6 @@ Helpers for persisting prompt history entries using SQLite.
 
 from __future__ import annotations
 
-import json
 import os
 import sqlite3
 import threading
@@ -12,14 +11,11 @@ import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple, TypeVar
 
 from .models import OutputRecord, PromptHistoryEntry
-from .normalizers import (
-    normalize_metadata,
-    normalize_output_payload,
-    serialize_metadata,
-)
+from .normalizers import normalize_metadata, normalize_output_payload
+from .serialization import deserialize_metadata, serialize_metadata
 
 
 def _default_storage_directory() -> Path:
@@ -40,8 +36,12 @@ def _ensure_directory(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
 
-def _format_output_record(filename: str, subfolder: str, output_type: str) -> OutputRecord:
-    return OutputRecord(filename=filename, subfolder=subfolder, type=output_type)
+T = TypeVar("T")
+
+
+def _chunked(values: Sequence[T], chunk_size: int) -> Iterator[Sequence[T]]:
+    for idx in range(0, len(values), chunk_size):
+        yield values[idx : idx + chunk_size]
 
 
 class PromptHistoryStorage:
@@ -78,24 +78,6 @@ class PromptHistoryStorage:
                 if commit:
                     self._connection.rollback()
                 raise
-
-    def _row_to_entry(
-        self,
-        row: sqlite3.Row,
-        files: Sequence[Any] = (),
-    ) -> PromptHistoryEntry:
-        metadata = json.loads(row["metadata"]) if row["metadata"] else {}
-        normalized_files: Tuple[Dict[str, Any], ...] = tuple(
-            item.to_dict() if isinstance(item, OutputRecord) else dict(item) for item in files
-        )
-        return PromptHistoryEntry(
-            id=row["id"],
-            created_at=row["created_at"],
-            prompt=row["prompt"],
-            metadata=metadata,
-            last_used_at=row["last_used_at"],
-            files=normalized_files,
-        )
 
     def _create_entry_locked(
         self,
@@ -146,7 +128,7 @@ class PromptHistoryStorage:
         # Note: We ignore tags in search now
         row = cursor.execute(
             """
-            SELECT id, created_at, last_used_at, prompt, tags, metadata
+            SELECT id, created_at, last_used_at, prompt, metadata
             FROM prompt_history
             WHERE prompt = :prompt AND metadata = :metadata
             ORDER BY last_used_at DESC
@@ -155,12 +137,12 @@ class PromptHistoryStorage:
             payload,
         ).fetchone()
         if row is not None:
-            return self._row_to_entry(row)
+            return PromptHistoryEntry.from_row(row)
 
         # Fallback: find by prompt and manually check metadata
         fallback_rows = cursor.execute(
             """
-            SELECT id, created_at, last_used_at, prompt, tags, metadata
+            SELECT id, created_at, last_used_at, prompt, metadata
             FROM prompt_history
             WHERE prompt = ?
             ORDER BY last_used_at DESC, created_at DESC
@@ -170,7 +152,7 @@ class PromptHistoryStorage:
         ).fetchall()
 
         for candidate_row in fallback_rows:
-            candidate_entry = self._row_to_entry(candidate_row)
+            candidate_entry = PromptHistoryEntry.from_row(candidate_row)
             if candidate_entry.metadata == metadata:
                 return candidate_entry
 
@@ -224,7 +206,7 @@ class PromptHistoryStorage:
             if not row:
                 return
 
-            current_metadata = json.loads(row["metadata"]) if row["metadata"] else {}
+            current_metadata = deserialize_metadata(row["metadata"])
             # Only update if there are changes
             changed = False
             for k, v in metadata_update.items():
@@ -243,9 +225,9 @@ class PromptHistoryStorage:
         Return stored entries grouped by prompt text, ordered by recent use.
         """
         sql = (
-            "SELECT id, created_at, last_used_at, prompt, tags, metadata "
+            "SELECT id, created_at, last_used_at, prompt, metadata "
             "FROM ("
-            "SELECT id, created_at, last_used_at, prompt, tags, metadata, "
+            "SELECT id, created_at, last_used_at, prompt, metadata, "
             "ROW_NUMBER() OVER ("
             "PARTITION BY prompt "
             "ORDER BY last_used_at DESC, created_at DESC, id DESC"
@@ -276,7 +258,7 @@ class PromptHistoryStorage:
         entries: List[PromptHistoryEntry] = []
         for row in rows:
             files = tuple(outputs_map.get(row["prompt"], []))
-            entry = self._row_to_entry(row, files)
+            entry = PromptHistoryEntry.from_row(row, files)
             if metadata_map and files:
                 prompt_entry_ids = {
                     record.get("entry_id")
@@ -364,35 +346,6 @@ class PromptHistoryStorage:
 
         return mapping
 
-    def _fetch_outputs(
-        self, cursor: sqlite3.Cursor, entry_ids: Sequence[str]
-    ) -> Dict[str, List[OutputRecord]]:
-        if not entry_ids:
-            return {}
-
-        placeholders = ",".join(["?"] * len(entry_ids))
-        sql = (
-            "SELECT entry_id, filename, subfolder, type FROM prompt_history_output "
-            f"WHERE entry_id IN ({placeholders}) ORDER BY id"
-        )
-
-        rows = cursor.execute(sql, tuple(entry_ids)).fetchall()
-
-        outputs: Dict[str, List[OutputRecord]] = {}
-        for entry_id in entry_ids:
-            outputs.setdefault(entry_id, [])
-
-        for row in rows:
-            entry_id = row["entry_id"]
-            record = _format_output_record(
-                row["filename"],
-                row["subfolder"],
-                row["type"],
-            )
-            outputs.setdefault(entry_id, []).append(record)
-
-        return outputs
-
     def _fetch_outputs_by_prompt(
         self, cursor: sqlite3.Cursor, prompts: Sequence[str]
     ) -> Dict[str, List[Dict[str, Any]]]:
@@ -402,8 +355,7 @@ class PromptHistoryStorage:
         outputs: Dict[str, List[OutputRecord]] = {prompt: [] for prompt in prompts}
         chunk_size = 900
 
-        for idx in range(0, len(prompts), chunk_size):
-            chunk = prompts[idx : idx + chunk_size]
+        for chunk in _chunked(prompts, chunk_size):
             placeholders = ",".join(["?"] * len(chunk))
             sql = (
                 "SELECT p.prompt, o.entry_id, o.filename, o.subfolder, o.type "
@@ -434,20 +386,12 @@ class PromptHistoryStorage:
         metadata_map: Dict[str, Dict[str, Any]] = {}
         chunk_size = 900
 
-        for idx in range(0, len(entry_ids), chunk_size):
-            chunk = entry_ids[idx : idx + chunk_size]
+        for chunk in _chunked(entry_ids, chunk_size):
             placeholders = ",".join(["?"] * len(chunk))
             sql = f"SELECT id, metadata FROM prompt_history WHERE id IN ({placeholders})"
             rows = cursor.execute(sql, tuple(chunk)).fetchall()
             for row in rows:
-                metadata_raw = row["metadata"]
-                if isinstance(metadata_raw, str):
-                    metadata = json.loads(metadata_raw) if metadata_raw else {}
-                elif isinstance(metadata_raw, dict):
-                    metadata = dict(metadata_raw)
-                else:
-                    metadata = {}
-                metadata_map[row["id"]] = metadata
+                metadata_map[row["id"]] = deserialize_metadata(row["metadata"])
 
         return metadata_map
 

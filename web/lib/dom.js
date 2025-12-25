@@ -13,7 +13,7 @@ export const createEl = (tag, className = "", text = null) => {
 export const safeText = (value, fallback = "") =>
   value === null || value === undefined ? fallback : String(value);
 
-export const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+export { clamp } from "./numberUtils.js";
 
 export function ensureStylesheet() {
   const attr = "data-phg-style";

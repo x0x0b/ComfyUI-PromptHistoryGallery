@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 from typing import Any, Dict, Sequence, Tuple
+
+from .serialization import deserialize_metadata
 
 
 @dataclass(frozen=True)
@@ -24,14 +25,7 @@ class PromptHistoryEntry:
         row: Any,
         files: Sequence[Any] = (),
     ) -> "PromptHistoryEntry":
-        metadata_raw = row["metadata"]
-
-        if isinstance(metadata_raw, str):
-            metadata = json.loads(metadata_raw) if metadata_raw else {}
-        elif isinstance(metadata_raw, dict):
-            metadata = dict(metadata_raw)
-        else:
-            metadata = {}
+        metadata = deserialize_metadata(row["metadata"])
         normalized_files: Tuple[Dict[str, Any], ...] = tuple(
             item.to_dict() if hasattr(item, "to_dict") else dict(item) for item in files
         )
