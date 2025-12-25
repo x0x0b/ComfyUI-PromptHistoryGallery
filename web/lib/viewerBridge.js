@@ -94,19 +94,15 @@ export class ViewerBridge {
 
     const metadataByEntryId =
       entry?.metadata && typeof entry.metadata === "object"
-        ? entry.metadata._phg_entry_metadata ?? null
+        ? (entry.metadata._phg_entry_metadata ?? null)
         : null;
-    const fallbackMetaString = entry
-      ? formatMetadata(extractMetadata(entry))
-      : "";
+    const fallbackMetaString = entry ? formatMetadata(extractMetadata(entry)) : "";
 
     const fragment = document.createDocumentFragment();
     items.forEach((item, index) => {
       let metaString = fallbackMetaString;
       if (metadataByEntryId && item?.entryId && metadataByEntryId[item.entryId]) {
-        metaString = formatMetadata(
-          extractMetadata({ metadata: metadataByEntryId[item.entryId] })
-        );
+        metaString = formatMetadata(extractMetadata({ metadata: metadataByEntryId[item.entryId] }));
       }
       const image = document.createElement("img");
       image.src = item.thumb ?? item.url;

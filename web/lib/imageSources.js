@@ -100,10 +100,10 @@ function appendFromCollection(result, seen, collection, { allowMissingExtension 
     });
     if (!descriptor) continue;
 
-  const params = {
-    filename: descriptor.filename,
-    type: descriptor.type ? String(descriptor.type) : "output",
-  };
+    const params = {
+      filename: descriptor.filename,
+      type: descriptor.type ? String(descriptor.type) : "output",
+    };
     if (descriptor.subfolder) {
       params.subfolder = descriptor.subfolder;
     }
@@ -116,13 +116,13 @@ function appendFromCollection(result, seen, collection, { allowMissingExtension 
     if (seen.has(key)) continue;
     seen.add(key);
 
-  result.push({
-    params,
-    title: descriptor.title ? String(descriptor.title) : descriptor.filename,
-    thumbHint: descriptor.thumbnail ?? null,
-    entryId: descriptor.entryId ?? null,
-  });
-}
+    result.push({
+      params,
+      title: descriptor.title ? String(descriptor.title) : descriptor.filename,
+      thumbHint: descriptor.thumbnail ?? null,
+      entryId: descriptor.entryId ?? null,
+    });
+  }
 }
 
 function collectMetadataCollections(entry) {

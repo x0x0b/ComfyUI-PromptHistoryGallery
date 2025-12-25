@@ -271,9 +271,7 @@ class PromptHistoryStorage:
                 if isinstance(record, dict) and record.get("entry_id")
             }
             metadata_map = (
-                self._fetch_metadata_by_entry_ids(cursor, sorted(entry_ids))
-                if entry_ids
-                else {}
+                self._fetch_metadata_by_entry_ids(cursor, sorted(entry_ids)) if entry_ids else {}
             )
         entries: List[PromptHistoryEntry] = []
         for row in rows:
