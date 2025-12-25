@@ -1,3 +1,5 @@
+import { clamp } from "./numberUtils.js";
+
 const STORAGE_KEY = "phg.preview.settings";
 
 const MIN_VIEWPORT_PERCENT = 5;
@@ -23,10 +25,6 @@ export const PREVIEW_POSITIONS = Object.freeze([
 ]);
 
 const POSITION_SET = new Set(PREVIEW_POSITIONS.map((item) => item.value));
-
-function clamp(value, min, max) {
-  return Math.min(max, Math.max(min, value));
-}
 
 function clampInt(value, min, max, fallback) {
   const num = Number(value);

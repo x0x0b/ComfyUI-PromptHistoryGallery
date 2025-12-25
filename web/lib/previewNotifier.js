@@ -1,5 +1,6 @@
 import { createHistoryApi } from "./historyApi.js";
 import { buildImageSources } from "./imageSources.js";
+import { clamp } from "./numberUtils.js";
 import { getPreviewSettingsStore, DEFAULT_SETTINGS, clampPercent } from "./previewSettings.js";
 
 const HOST_ATTR = "data-phg-preview-root";
@@ -63,10 +64,6 @@ export function extractEntryIds(payload) {
   }
   const single = sanitizeEntryId(candidate);
   return single ? [single] : [];
-}
-
-function clamp(value, min, max) {
-  return Math.min(max, Math.max(min, value));
 }
 
 function computeRuntimeSettings(settings = {}, fallbackDuration = DEFAULT_DURATION_MS) {

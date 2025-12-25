@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any, Dict, Optional
 
 from .models import OutputRecord
+from .serialization import deserialize_metadata, serialize_metadata
 
 
 def normalize_metadata(raw: Any) -> Dict[str, Any]:
@@ -49,5 +49,9 @@ def normalize_output_payload(file_info: Any) -> Optional[OutputRecord]:
     return None
 
 
-def serialize_metadata(metadata: Dict[str, Any]) -> str:
-    return json.dumps(metadata, ensure_ascii=False)
+__all__ = [
+    "deserialize_metadata",
+    "normalize_metadata",
+    "normalize_output_payload",
+    "serialize_metadata",
+]
