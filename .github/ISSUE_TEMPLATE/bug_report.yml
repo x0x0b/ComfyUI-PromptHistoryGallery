@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a problem with the Sprite Fusion Pixel Snapper node for ComfyUI.
+description: Report a problem with the ComfyUI-PromptHistoryGallery.
 title: "[Bug]: "
 labels:
   - bug
