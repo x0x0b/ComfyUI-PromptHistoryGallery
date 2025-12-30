@@ -39,7 +39,7 @@ The node executes on every graph run so repeated prompts are captured. Each exec
 
 ### Formatting
 
-- One-shot fixer: `scripts/format.sh` (needs `pipx` and Node) runs Ruff via `pipx run --spec ruff==0.14.9` plus Prettier `-w` to apply fixes.
+- One-shot fixer: `scripts/format.sh` (needs `pipx` and Node) runs Ruff via `pipx run --spec ruff==0.14.10` plus Prettier `-w` to apply fixes.
 - Install dev tools: `pip install -e .[dev]` (provides Ruff).
 - Python: run `ruff format --check .` and `ruff check --select I .` (add `--fix` locally if you want auto-fixes).
 - Web/JS/CSS: run `npx prettier@3.7.4 --check "web/**/*.{js,jsx,ts,tsx,css,scss,html,json}"` (honors `.prettierignore`; `web/vendor/` is excluded).
