@@ -11,6 +11,7 @@ from comfy_execution.utils import get_executing_context
 
 from ..normalizers import normalize_metadata
 from ..registry import register_prompt_entry
+from ..settings import is_capture_enabled
 from ..storage import get_prompt_history_storage
 
 _NODE_METADATA_KEY = "_prompt_history_node"
@@ -83,20 +84,23 @@ class PromptHistoryInput:
         prompt: str,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Tuple[Any]:
-        metadata_dict = normalize_metadata(metadata)
         context = get_executing_context()
         prompt_id = context.prompt_id if context else None
-        node_identifier = _resolve_node_identifier(context)
-        if node_identifier and _NODE_METADATA_KEY not in metadata_dict:
-            metadata_dict[_NODE_METADATA_KEY] = node_identifier
-        entry, created = self._storage.ensure_entry(
-            prompt=prompt,
-            metadata=metadata_dict,
-        )
-        if not created:
-            self._storage.touch_entries([entry.id])
-        if prompt_id:
-            register_prompt_entry(prompt_id, entry.id)
+
+        if is_capture_enabled():
+            metadata_dict = normalize_metadata(metadata)
+            node_identifier = _resolve_node_identifier(context)
+            if node_identifier and _NODE_METADATA_KEY not in metadata_dict:
+                metadata_dict[_NODE_METADATA_KEY] = node_identifier
+            entry, created = self._storage.ensure_entry(
+                prompt=prompt,
+                metadata=metadata_dict,
+            )
+            if not created:
+                self._storage.touch_entries([entry.id])
+            if prompt_id:
+                register_prompt_entry(prompt_id, entry.id)
+
         tokens = clip.tokenize(prompt)
         conditioning = clip.encode_from_tokens_scheduled(tokens)
         return (conditioning,)

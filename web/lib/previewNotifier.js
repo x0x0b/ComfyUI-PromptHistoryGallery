@@ -504,7 +504,14 @@ export function createPreviewNotifier({
       img.alt = source.title ?? "";
       img.loading = "lazy";
       img.decoding = "async";
+      let triedFallback = false;
       img.addEventListener("error", () => {
+        // Thumbnails may be unavailable; retry once with the full-size image.
+        if (!triedFallback && source.url && source.url !== img.src) {
+          triedFallback = true;
+          img.src = source.url;
+          return;
+        }
         button.remove();
         if (!grid.children.length) {
           removeCard(card);

@@ -1,2 +1,5 @@
 # Ignore generated history database files.
 prompt_history.*
+
+# Ignore the generated thumbnail cache.
+thumbs/

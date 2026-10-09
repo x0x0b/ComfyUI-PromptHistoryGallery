@@ -4,6 +4,7 @@ Helpers for persisting prompt history entries using SQLite.
 
 from __future__ import annotations
 
+import logging
 import os
 import sqlite3
 import threading
@@ -17,6 +18,16 @@ from .models import OutputRecord, PromptHistoryEntry
 from .normalizers import normalize_metadata, normalize_output_payload
 from .serialization import deserialize_metadata, serialize_metadata
 
+LOGGER = logging.getLogger(__name__)
+
+ENTRY_METADATA_KEY = "_phg_entry_metadata"
+
+LEGACY_METADATA_KEYS = ("comfyui_prompt", "comfyui_workflow", "comfyui_params")
+
+_METADATA_COMPACTION_VERSION = 1
+
+GroupKey = Tuple[str, str]
+
 
 def _default_storage_directory() -> Path:
     """
@@ -27,6 +38,13 @@ def _default_storage_directory() -> Path:
     if base_dir:
         return Path(base_dir).expanduser()
     return Path(__file__).resolve().parent / "data"
+
+
+def default_storage_directory() -> Path:
+    """
+    Public accessor for the resolved storage directory.
+    """
+    return _default_storage_directory()
 
 
 def _ensure_directory(path: Path) -> None:
@@ -83,6 +101,7 @@ class PromptHistoryStorage:
         self,
         cursor: sqlite3.Cursor,
         prompt: str,
+        negative_prompt: str,
         metadata: Dict[str, Any],
     ) -> PromptHistoryEntry:
         now_iso = datetime.now(timezone.utc).isoformat()
@@ -90,20 +109,24 @@ class PromptHistoryStorage:
             id=str(uuid.uuid4()),
             created_at=now_iso,
             prompt=prompt,
+            negative_prompt=negative_prompt,
             metadata=metadata.copy(),
             last_used_at=now_iso,
             files=tuple(),
         )
         cursor.execute(
             """
-            INSERT INTO prompt_history (id, created_at, last_used_at, prompt, tags, metadata)
-            VALUES (:id, :created_at, :last_used_at, :prompt, :tags, :metadata)
+            INSERT INTO prompt_history
+                (id, created_at, last_used_at, prompt, negative_prompt, tags, metadata)
+            VALUES
+                (:id, :created_at, :last_used_at, :prompt, :negative_prompt, :tags, :metadata)
             """,
             {
                 "id": entry.id,
                 "created_at": entry.created_at,
                 "last_used_at": entry.last_used_at,
                 "prompt": entry.prompt,
+                "negative_prompt": entry.negative_prompt,
                 "tags": "[]",  # Legacy column
                 "metadata": serialize_metadata(entry.metadata),
             },
@@ -114,6 +137,7 @@ class PromptHistoryStorage:
         self,
         cursor: sqlite3.Cursor,
         prompt: str,
+        negative_prompt: str,
         metadata: Dict[str, Any],
     ) -> Optional[PromptHistoryEntry]:
         """
@@ -123,14 +147,17 @@ class PromptHistoryStorage:
         # First try exact match (fast path, though less likely now with ignored keys)
         payload = {
             "prompt": prompt,
+            "negative_prompt": negative_prompt,
             "metadata": serialize_metadata(metadata),
         }
         # Note: We ignore tags in search now
         row = cursor.execute(
             """
-            SELECT id, created_at, last_used_at, prompt, metadata
+            SELECT id, created_at, last_used_at, prompt, negative_prompt, metadata
             FROM prompt_history
-            WHERE prompt = :prompt AND metadata = :metadata
+            WHERE prompt = :prompt
+              AND negative_prompt = :negative_prompt
+              AND metadata = :metadata
             ORDER BY last_used_at DESC
             LIMIT 1
             """,
@@ -142,13 +169,13 @@ class PromptHistoryStorage:
         # Fallback: find by prompt and manually check metadata
         fallback_rows = cursor.execute(
             """
-            SELECT id, created_at, last_used_at, prompt, metadata
+            SELECT id, created_at, last_used_at, prompt, negative_prompt, metadata
             FROM prompt_history
-            WHERE prompt = ?
+            WHERE prompt = ? AND negative_prompt = ?
             ORDER BY last_used_at DESC, created_at DESC
             LIMIT ?
             """,
-            (prompt, self._FALLBACK_LOOKUP_LIMIT),
+            (prompt, negative_prompt, self._FALLBACK_LOOKUP_LIMIT),
         ).fetchall()
 
         for candidate_row in fallback_rows:
@@ -162,6 +189,7 @@ class PromptHistoryStorage:
         self,
         prompt: str,
         *,
+        negative_prompt: str = "",
         metadata: Optional[Dict[str, Any]] = None,
     ) -> PromptHistoryEntry:
         """Persist a new entry for the provided prompt text."""
@@ -170,6 +198,7 @@ class PromptHistoryStorage:
             entry = self._create_entry_locked(
                 cursor,
                 prompt,
+                negative_prompt or "",
                 incoming_metadata,
             )
         return entry
@@ -178,6 +207,7 @@ class PromptHistoryStorage:
         self,
         prompt: str,
         *,
+        negative_prompt: str = "",
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Tuple[PromptHistoryEntry, bool]:
         """
@@ -185,11 +215,16 @@ class PromptHistoryStorage:
         Returns the entry and a flag indicating whether it was newly created.
         """
         incoming_metadata = normalize_metadata(metadata)
+        normalized_negative = negative_prompt or ""
         with self._locked_cursor(commit=True) as cursor:
-            existing = self._find_entry_locked(cursor, prompt, incoming_metadata)
+            existing = self._find_entry_locked(
+                cursor, prompt, normalized_negative, incoming_metadata
+            )
             if existing is not None:
                 return existing, False
-            entry = self._create_entry_locked(cursor, prompt, incoming_metadata)
+            entry = self._create_entry_locked(
+                cursor, prompt, normalized_negative, incoming_metadata
+            )
             return entry, True
 
     def update_metadata(self, entry_id: str, metadata_update: Dict[str, Any]) -> None:
@@ -225,11 +260,11 @@ class PromptHistoryStorage:
         Return stored entries grouped by prompt text, ordered by recent use.
         """
         sql = (
-            "SELECT id, created_at, last_used_at, prompt, metadata "
+            "SELECT id, created_at, last_used_at, prompt, negative_prompt, metadata "
             "FROM ("
-            "SELECT id, created_at, last_used_at, prompt, metadata, "
+            "SELECT id, created_at, last_used_at, prompt, negative_prompt, metadata, "
             "ROW_NUMBER() OVER ("
-            "PARTITION BY prompt "
+            "PARTITION BY prompt, negative_prompt "
             "ORDER BY last_used_at DESC, created_at DESC, id DESC"
             ") AS row_rank "
             "FROM prompt_history"
@@ -244,8 +279,8 @@ class PromptHistoryStorage:
             params = ()
         with self._locked_cursor() as cursor:
             rows = cursor.execute(sql, params).fetchall()
-            prompts = [row["prompt"] for row in rows]
-            outputs_map = self._fetch_outputs_by_prompt(cursor, prompts) if prompts else {}
+            group_keys = [(row["prompt"], row["negative_prompt"]) for row in rows]
+            outputs_map = self._fetch_outputs_by_prompt(cursor, group_keys) if group_keys else {}
             entry_ids = {
                 record.get("entry_id")
                 for records in outputs_map.values()
@@ -257,7 +292,7 @@ class PromptHistoryStorage:
             )
         entries: List[PromptHistoryEntry] = []
         for row in rows:
-            files = tuple(outputs_map.get(row["prompt"], []))
+            files = tuple(outputs_map.get((row["prompt"], row["negative_prompt"]), []))
             entry = PromptHistoryEntry.from_row(row, files)
             if metadata_map and files:
                 prompt_entry_ids = {
@@ -266,7 +301,7 @@ class PromptHistoryStorage:
                     if isinstance(record, dict) and record.get("entry_id")
                 }
                 if prompt_entry_ids:
-                    entry.metadata["_phg_entry_metadata"] = {
+                    entry.metadata[ENTRY_METADATA_KEY] = {
                         entry_id: metadata_map[entry_id]
                         for entry_id in prompt_entry_ids
                         if entry_id in metadata_map
@@ -323,49 +358,62 @@ class PromptHistoryStorage:
                 [(timestamp, entry_id) for entry_id in targets],
             )
 
-    def find_entry_ids_for_prompts(self, prompts: Sequence[str]) -> Dict[str, str]:
-        candidates = [str(p) for p in prompts if isinstance(p, str) and p]
-        if not candidates:
-            return {}
+    def find_entry_ids_for_prompt_pairs(self, pairs: Sequence[GroupKey]) -> List[str]:
+        """
+        Resolve prompt/negative pairs to the most recently used entry id of each.
+        """
+        wanted = {
+            (prompt, negative or "")
+            for prompt, negative in pairs
+            if isinstance(prompt, str) and prompt
+        }
+        if not wanted:
+            return []
 
-        placeholders = ",".join(["?"] * len(candidates))
-        sql = (
-            "SELECT prompt, id FROM prompt_history WHERE prompt IN ("
-            + placeholders
-            + ") ORDER BY last_used_at DESC, created_at DESC"
-        )
+        resolved: List[str] = []
+        seen: set = set()
+        prompts = sorted({prompt for prompt, _ in wanted})
 
         with self._locked_cursor() as cursor:
-            rows = cursor.execute(sql, tuple(candidates)).fetchall()
+            for chunk in _chunked(prompts, 900):
+                placeholders = ",".join(["?"] * len(chunk))
+                sql = (
+                    "SELECT prompt, negative_prompt, id FROM prompt_history "
+                    f"WHERE prompt IN ({placeholders}) "
+                    "ORDER BY last_used_at DESC, created_at DESC"
+                )
+                for row in cursor.execute(sql, tuple(chunk)):
+                    key = (row["prompt"], row["negative_prompt"] or "")
+                    if key in wanted and key not in seen:
+                        seen.add(key)
+                        resolved.append(row["id"])
 
-        mapping: Dict[str, str] = {}
-        for row in rows:
-            prompt = row["prompt"]
-            if prompt not in mapping:
-                mapping[prompt] = row["id"]
-
-        return mapping
+        return resolved
 
     def _fetch_outputs_by_prompt(
-        self, cursor: sqlite3.Cursor, prompts: Sequence[str]
-    ) -> Dict[str, List[Dict[str, Any]]]:
-        if not prompts:
+        self, cursor: sqlite3.Cursor, group_keys: Sequence[GroupKey]
+    ) -> Dict[GroupKey, List[Dict[str, Any]]]:
+        if not group_keys:
             return {}
 
-        outputs: Dict[str, List[OutputRecord]] = {prompt: [] for prompt in prompts}
+        outputs: Dict[GroupKey, List[OutputRecord]] = {key: [] for key in group_keys}
+        wanted = set(group_keys)
+        prompts = sorted({prompt for prompt, _ in wanted})
         chunk_size = 900
 
         for chunk in _chunked(prompts, chunk_size):
             placeholders = ",".join(["?"] * len(chunk))
             sql = (
-                "SELECT p.prompt, o.entry_id, o.filename, o.subfolder, o.type "
+                "SELECT p.prompt, p.negative_prompt, o.entry_id, o.filename, o.subfolder, o.type "
                 "FROM prompt_history_output o "
                 "JOIN prompt_history p ON p.id = o.entry_id "
                 f"WHERE p.prompt IN ({placeholders}) ORDER BY o.id"
             )
             rows = cursor.execute(sql, tuple(chunk)).fetchall()
             for row in rows:
-                prompt = row["prompt"]
+                key = (row["prompt"], row["negative_prompt"] or "")
+                if key not in wanted:
+                    continue
                 record: Dict[str, Any] = {"filename": row["filename"]}
                 if row["subfolder"]:
                     record["subfolder"] = row["subfolder"]
@@ -373,7 +421,7 @@ class PromptHistoryStorage:
                     record["type"] = row["type"]
                 if row["entry_id"]:
                     record["entry_id"] = row["entry_id"]
-                outputs.setdefault(prompt, []).append(record)
+                outputs.setdefault(key, []).append(record)
 
         return outputs
 
@@ -397,25 +445,56 @@ class PromptHistoryStorage:
 
     def delete(self, entry_id: str) -> bool:
         """
-        Delete all entries matching the prompt for the supplied entry id.
+        Delete all entries matching the prompt pair of the supplied entry id.
         Returns True if any rows were removed.
         """
         with self._locked_cursor(commit=True) as cursor:
             row = cursor.execute(
-                "SELECT prompt FROM prompt_history WHERE id = ?", (entry_id,)
+                "SELECT prompt, negative_prompt FROM prompt_history WHERE id = ?", (entry_id,)
             ).fetchone()
             if not row:
                 return False
-            cursor.execute("DELETE FROM prompt_history WHERE prompt = ?", (row["prompt"],))
+            cursor.execute(
+                "DELETE FROM prompt_history WHERE prompt = ? AND negative_prompt = ?",
+                (row["prompt"], row["negative_prompt"]),
+            )
             return cursor.rowcount > 0
 
     def clear(self) -> None:
         """
         Remove all stored entries.
+
+        Deliberately leaves ``prompt_history_settings`` alone: clearing history
+        must not reset the user's preferences.
         """
         with self._locked_cursor(commit=True) as cursor:
             cursor.execute("DELETE FROM prompt_history_output")
             cursor.execute("DELETE FROM prompt_history")
+
+    def get_setting(self, key: str) -> Optional[str]:
+        """
+        Read a runtime setting. Returns None when it was never written, which
+        lets callers fall back to their own default.
+        """
+        with self._locked_cursor() as cursor:
+            row = cursor.execute(
+                "SELECT value FROM prompt_history_settings WHERE key = ?", (key,)
+            ).fetchone()
+        return row["value"] if row is not None else None
+
+    def set_setting(self, key: str, value: str) -> None:
+        """
+        Persist a runtime setting.
+        """
+        with self._locked_cursor(commit=True) as cursor:
+            cursor.execute(
+                """
+                INSERT INTO prompt_history_settings (key, value)
+                VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """,
+                (key, value),
+            )
 
     def _configure_database(self) -> None:
         """
@@ -431,6 +510,7 @@ class PromptHistoryStorage:
                     created_at TEXT NOT NULL,
                     last_used_at TEXT NOT NULL,
                     prompt TEXT NOT NULL,
+                    negative_prompt TEXT NOT NULL DEFAULT '',
                     tags TEXT NOT NULL,
                     metadata TEXT NOT NULL
                 )
@@ -439,6 +519,10 @@ class PromptHistoryStorage:
             existing_columns = {
                 row["name"] for row in cursor.execute("PRAGMA table_info(prompt_history)")
             }
+            if "negative_prompt" not in existing_columns:
+                cursor.execute(
+                    "ALTER TABLE prompt_history ADD COLUMN negative_prompt TEXT NOT NULL DEFAULT ''"
+                )
             if "last_used_at" not in existing_columns:
                 cursor.execute("ALTER TABLE prompt_history ADD COLUMN last_used_at TEXT")
                 cursor.execute(
@@ -466,7 +550,80 @@ class PromptHistoryStorage:
                 ON prompt_history_output (entry_id)
                 """
             )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS prompt_history_settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                )
+                """
+            )
             cursor.execute("DROP INDEX IF EXISTS idx_prompt_history_prompt_unique")
+            # Speeds up the ROW_NUMBER() window used by list() and the prompt
+            # join in _fetch_outputs_by_prompt.
+            cursor.execute("DROP INDEX IF EXISTS idx_prompt_history_prompt_recent")
+            cursor.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_prompt_history_group_recent
+                ON prompt_history (prompt, negative_prompt, last_used_at DESC, created_at DESC)
+                """
+            )
+            compacted = self._compact_legacy_metadata(cursor)
+
+        if compacted:
+            try:
+                with self._locked_cursor(commit=True) as cursor:
+                    cursor.execute("VACUUM")
+                    cursor.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            except sqlite3.Error:
+                LOGGER.warning(
+                    "Could not reclaim space after compacting prompt history metadata",
+                    exc_info=True,
+                )
+
+    def _compact_legacy_metadata(self, cursor: sqlite3.Cursor) -> bool:
+        """
+        Drop workflow payloads that older releases wrote into metadata.
+
+        Guarded by ``PRAGMA user_version`` so upgrading rewrites the table only
+        once. Rows are rewritten through the regular serializer, so anything
+        that is not a known legacy key (the node identifier, or keys added by
+        future versions) survives untouched.
+
+        Returns True when at least one row was rewritten.
+        """
+        if cursor.execute("PRAGMA user_version").fetchone()[0] >= _METADATA_COMPACTION_VERSION:
+            return False
+
+        rows = cursor.execute("SELECT id, metadata FROM prompt_history").fetchall()
+        freed = 0
+        compacted = 0
+
+        for row in rows:
+            metadata = deserialize_metadata(row["metadata"])
+            if not any(key in metadata for key in LEGACY_METADATA_KEYS):
+                continue
+
+            before = len(row["metadata"] or "")
+            for key in LEGACY_METADATA_KEYS:
+                metadata.pop(key, None)
+            stripped = serialize_metadata(metadata)
+            cursor.execute(
+                "UPDATE prompt_history SET metadata = ? WHERE id = ?",
+                (stripped, row["id"]),
+            )
+            freed += max(0, before - len(stripped))
+            compacted += 1
+
+        cursor.execute(f"PRAGMA user_version = {_METADATA_COMPACTION_VERSION}")
+
+        if compacted:
+            LOGGER.info(
+                "Compacted %s prompt history entries, releasing %s bytes of workflow metadata",
+                compacted,
+                freed,
+            )
+        return compacted > 0
 
 
 _STORAGE_INSTANCE: Optional[PromptHistoryStorage] = None

@@ -13,9 +13,17 @@ export function resolveComfyApi() {
   return comfyApp?.api ?? window.comfyAPI?.api?.api ?? window.comfyAPI?.api ?? null;
 }
 
+const PROMPT_WIDGET_NAME = "prompt";
+const NEGATIVE_WIDGET_NAME = "negative_prompt";
+
 export function resolvePromptWidget(node) {
   if (!node?.widgets || !Array.isArray(node.widgets)) return null;
-  return node.widgets.find((widget) => widget?.name === "prompt") ?? null;
+  return node.widgets.find((widget) => widget?.name === PROMPT_WIDGET_NAME) ?? null;
+}
+
+export function resolveNegativeWidget(node) {
+  if (!node?.widgets || !Array.isArray(node.widgets)) return null;
+  return node.widgets.find((widget) => widget?.name === NEGATIVE_WIDGET_NAME) ?? null;
 }
 
 export function normalizeTargetPayload(node) {

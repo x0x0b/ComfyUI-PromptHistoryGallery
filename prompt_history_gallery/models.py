@@ -15,6 +15,7 @@ class PromptHistoryEntry:
     id: str
     created_at: str
     prompt: str
+    negative_prompt: str
     metadata: Dict[str, Any]
     last_used_at: str
     files: Tuple[Dict[str, Any], ...] = field(default_factory=tuple)
@@ -33,6 +34,7 @@ class PromptHistoryEntry:
             id=row["id"],
             created_at=row["created_at"],
             prompt=row["prompt"],
+            negative_prompt=row["negative_prompt"] or "",
             metadata=metadata,
             last_used_at=row["last_used_at"],
             files=normalized_files,
@@ -44,6 +46,7 @@ class PromptHistoryEntry:
             "id": self.id,
             "created_at": self.created_at,
             "prompt": self.prompt,
+            "negative_prompt": self.negative_prompt,
             "metadata": self.metadata.copy(),
             "last_used_at": self.last_used_at,
             "files": [item.copy() for item in self.files],

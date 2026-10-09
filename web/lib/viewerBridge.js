@@ -2,6 +2,8 @@ import { createAssetLoader } from "./assetLoader.js";
 import { extractMetadata, formatMetadata } from "./metadata.js";
 
 const DEFAULT_ROOT_ID = "phg-viewer-root";
+const DEFAULT_LAYER_ID = "phg-viewer-layer";
+const LAYER_CLASS = "phg-viewer-layer";
 
 function ensureElement(id) {
   let element = document.getElementById(id);
@@ -15,12 +17,31 @@ function ensureElement(id) {
   return element;
 }
 
+function ensureLayer(id) {
+  let element = document.getElementById(id);
+  if (!element) {
+    element = document.createElement("div");
+    element.id = id;
+    element.className = LAYER_CLASS;
+    element.setAttribute("popover", "manual");
+    document.body.appendChild(element);
+  }
+  return element;
+}
+
 export class ViewerBridge {
-  constructor({ cssUrl, scriptUrl, assetLoader = createAssetLoader(), rootId = DEFAULT_ROOT_ID }) {
+  constructor({
+    cssUrl,
+    scriptUrl,
+    assetLoader = createAssetLoader(),
+    rootId = DEFAULT_ROOT_ID,
+    layerId = DEFAULT_LAYER_ID,
+  }) {
     this.assetLoader = assetLoader;
     this.cssUrl = cssUrl;
     this.scriptUrl = scriptUrl;
     this.rootId = rootId;
+    this.layerId = layerId;
     this.instance = null;
     this.activeEntryId = null;
     this.cleanupFn = null;
@@ -41,7 +62,45 @@ export class ViewerBridge {
     return ensureElement(this.rootId);
   }
 
+  ensureLayer() {
+    return ensureLayer(this.layerId);
+  }
+
+  _showLayer() {
+    const layer = this.ensureLayer();
+    if (typeof layer.showPopover !== "function") {
+      layer.style.display = "block";
+      return layer;
+    }
+    try {
+      layer.showPopover();
+    } catch (error) {
+      console.error("[PromptHistoryGallery]", "Viewer layer show error", error);
+      layer.style.display = "block";
+    }
+    return layer;
+  }
+
+  _hideLayer() {
+    const layer = document.getElementById(this.layerId);
+    if (!layer) return;
+    layer.style.display = "";
+    try {
+      layer.hidePopover?.();
+    } catch (error) {
+      console.error("[PromptHistoryGallery]", "Viewer layer hide error", error);
+    }
+  }
+
   _teardown(fromHidden = false) {
+    try {
+      this._teardownInstance(fromHidden);
+    } finally {
+      this._hideLayer();
+    }
+  }
+
+  _teardownInstance(fromHidden = false) {
     const cleanup = this.cleanupFn;
     this.cleanupFn = null;
     if (typeof cleanup === "function") {
@@ -82,6 +141,13 @@ export class ViewerBridge {
     }
   }
 
+  removeLayer() {
+    const layer = document.getElementById(this.layerId);
+    if (layer?.parentNode) {
+      layer.parentNode.removeChild(layer);
+    }
+  }
+
   async open(entryId, items, startIndex = 0, entry = null) {
     if (!Array.isArray(items) || items.length === 0) {
       throw new Error("No images available for this entry.");
@@ -91,6 +157,8 @@ export class ViewerBridge {
 
     const root = this.ensureRoot();
     root.innerHTML = "";
+
+    const layer = this._showLayer();
 
     const metadataByEntryId =
       entry?.metadata && typeof entry.metadata === "object"
@@ -107,6 +175,15 @@ export class ViewerBridge {
       const image = document.createElement("img");
       image.src = item.thumb ?? item.url;
       image.setAttribute("data-original", item.url);
+      if (item.url && item.thumb && item.thumb !== item.url) {
+        image.addEventListener(
+          "error",
+          () => {
+            image.src = item.url;
+          },
+          { once: true }
+        );
+      }
       image.alt = item.title ?? "";
       if (item.title) {
         image.setAttribute("data-caption", item.title);
@@ -125,6 +202,7 @@ export class ViewerBridge {
     root.appendChild(fragment);
 
     const viewer = new window.Viewer(root, {
+      container: layer,
       navbar: true,
       toolbar: true,
       tooltip: true,
@@ -201,6 +279,7 @@ export class ViewerBridge {
   dispose() {
     this._teardown(false);
     this.removeRoot();
+    this.removeLayer();
   }
 
   isActive(entryId) {
