@@ -24,9 +24,7 @@ function isLikelyImage(name) {
   return IMAGE_EXTENSIONS.has(lowerExtension(name));
 }
 
-function resolveUrl(api, params) {
-  const search = new URLSearchParams(params);
-  const path = `/view?${search.toString()}`;
+function applyBasePath(api, path) {
   if (api?.fileURL) {
     try {
       return api.fileURL(path);
@@ -35,6 +33,22 @@ function resolveUrl(api, params) {
     }
   }
   return path;
+}
+
+function resolveUrl(api, params) {
+  return applyBasePath(api, `/view?${new URLSearchParams(params).toString()}`);
+}
+
+// The server downscales these, unlike /view which serves the original file.
+function resolveThumbUrl(api, params) {
+  const search = new URLSearchParams({
+    filename: params.filename,
+    type: params.type ? String(params.type) : "output",
+  });
+  if (params.subfolder) {
+    search.set("subfolder", params.subfolder);
+  }
+  return applyBasePath(api, `/prompt-history/thumb?${search.toString()}`);
 }
 
 function normalizeDescriptor(candidate, { allowMissingExtension = false } = {}) {
@@ -162,7 +176,7 @@ export function buildImageSources(entry, api) {
 
   return result.map((item) => {
     const url = resolveUrl(api, item.params);
-    let thumb = resolveUrl(api, item.params);
+    let thumb = resolveThumbUrl(api, item.params);
     if (item.thumbHint) {
       const hint = String(item.thumbHint);
       if (hint.startsWith("/view?")) {

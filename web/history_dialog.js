@@ -5,6 +5,8 @@ import { createPreviewNotifier, extractEntryIds } from "./lib/previewNotifier.js
 import {
   getPreviewSettingsStore,
   DEFAULT_SETTINGS,
+  DIALOG_THEMES,
+  dialogThemeVariables,
   MIN_VIEWPORT_PERCENT,
   MAX_VIEWPORT_PERCENT,
 } from "./lib/previewSettings.js";
@@ -23,9 +25,11 @@ import {
   resolveComfyApp,
   resolveNodeFromTarget,
   resolvePromptWidget,
+  resolveNegativeWidget,
   resolveUpstreamConnection,
   findFirstFreeStringWidget,
 } from "./lib/comfyBridge.js";
+import { attachDualInputSplitter, isDualInputNode } from "./lib/dualInputSplitter.js";
 
 export {};
 const EXTENSION_NAME = "PromptHistoryGallery.NodeDialog";
@@ -34,6 +38,10 @@ const HISTORY_LIMIT_MIN = 20;
 const HISTORY_LIMIT_MAX = 1000;
 const HISTORY_WIDGET_FLAG = "__phg_history_widget__";
 const HISTORY_WIDGET_LABEL = "⏱ History";
+const HISTORY_NODE_TYPES = ["PromptHistoryInput", "PromptHistoryDualInput"];
+const HISTORY_NODE_TITLES = new Set(["Prompt History Input", "Prompt History Dual Input"]);
+const PAGE_SIZE = 10;
+const SEARCH_DEBOUNCE_MS = 150;
 
 const TEXT = {
   title: "Prompt History",
@@ -58,8 +66,17 @@ const TEXT = {
   tabHistory: "History",
   tabSettings: "Settings",
   sectionGeneral: "General",
+  sectionHistory: "History Capture",
   sectionUsage: "List Appearance",
+  sectionTheme: "Dialog Appearance",
   sectionPreview: "Popup Preview",
+  themeBackgroundLabel: "Background Color",
+  themeHint:
+    "Recolours the history dialog panel, its backdrop and the accent colour. Popup preview cards keep their own styling.",
+  historyCaptureToggle: "Save Prompts to History",
+  historyCaptureHint:
+    "When off, new runs are not recorded. Existing entries stay browsable and deletable.",
+  historyCaptureError: "Failed to update the history capture setting.",
   historyLimitLabel: "History Limit",
   historyLimitHint: "Number of prompts to keep in history.",
   searchPlaceholder: "Search prompts…",
@@ -70,10 +87,14 @@ const TEXT = {
   usageSettingsHighlight: "Highlight Frequent Prompts",
   usageSettingsRatio: "Highlight Threshold (% of max)",
   usageSettingsStart: "Minimum Images to Highlight",
+  promptNegativeTag: "Negative",
   previewToggle: "Enable Popup Preview",
   previewDuration: "Popup Duration",
   previewSizeLandscape: "Landscape Size (% width)",
   previewSizePortrait: "Portrait Size (% height)",
+  pagePrev: "Prev",
+  pageNext: "Next",
+  pageLabel: (page, total) => `Page ${page} of ${total}`,
 };
 
 const USAGE_RATIO_MIN = 0.05;
@@ -117,6 +138,7 @@ class HistoryDialog {
       }) ?? null;
 
     this._comfyShortcutGuard = null;
+    this._captureHistorySynced = undefined;
 
     this.state = {
       isOpen: false,
@@ -127,9 +149,11 @@ class HistoryDialog {
       activeTab: "history",
       searchQuery: "",
       searchMode: "and",
+      page: 1,
     };
 
     this.messageTimeout = null;
+    this._searchTimer = null;
     this._buildLayout();
     this._updateTargetLabel();
     this._syncSettingsUI();
@@ -149,15 +173,26 @@ class HistoryDialog {
     }
     this.state.isOpen = true;
     this._installComfyShortcutGuard();
-    this.backdrop.classList.remove("phg-hidden");
+    try {
+      this.dialog.showModal();
+    } catch (error) {
+      logError(LOGGER, "open dialog error", error);
+      this.state.isOpen = false;
+      this._removeComfyShortcutGuard();
+      return;
+    }
     this.refresh();
   }
 
   close() {
     if (!this.state.isOpen) return;
+    this.dialog.close();
+  }
+
+  _handleClosed() {
+    if (!this.state.isOpen) return;
     this.state.isOpen = false;
     this._removeComfyShortcutGuard();
-    this.backdrop.classList.add("phg-hidden");
     this.viewer.close();
   }
 
@@ -171,6 +206,7 @@ class HistoryDialog {
     try {
       const items = await this.historyApi.list(this._getHistoryLimit());
       this.state.entries = items;
+      this.state.page = 1;
       this.state.error = "";
       this._setMessage("");
     } catch (error) {
@@ -241,8 +277,31 @@ class HistoryDialog {
     this._syncSettingsUI();
   }
 
+  _syncCaptureHistory() {
+    const enabled = this.settingsState?.captureHistory !== false;
+    if (this._captureHistorySynced === enabled) return;
+    this._captureHistorySynced = enabled;
+    this.historyApi.updateSettings({ capture_history: enabled }).catch((error) => {
+      if (this._captureHistorySynced === enabled) {
+        this._captureHistorySynced = undefined;
+      }
+      logError(LOGGER, TEXT.historyCaptureError, error);
+    });
+  }
+
   _buildSettingsView() {
     const container = createEl("div", "phg-settings-container phg-hidden");
+
+    const captureToggle = this._buildToggleField(
+      TEXT.historyCaptureToggle,
+      () => this.settingsState?.captureHistory !== false,
+      (checked) => this._applySettingsPatch({ captureHistory: checked }),
+      "captureHistoryToggleInput"
+    );
+    captureToggle
+      .querySelector(".phg-settings-item__info")
+      ?.append(createEl("div", "phg-settings-item__hint", TEXT.historyCaptureHint));
+    const captureGroup = this._buildSettingsGroup(TEXT.sectionHistory, [captureToggle]);
 
     // -- List Appearance --
     const listGroup = this._buildSettingsGroup(TEXT.sectionUsage, [
@@ -278,6 +337,18 @@ class HistoryDialog {
         "highlightRatioInput"
       ),
     ]);
+
+    // -- Dialog Appearance --
+    const themeField = this._buildThemeField(
+      TEXT.themeBackgroundLabel,
+      DIALOG_THEMES,
+      () => this.settingsState?.dialogTheme ?? DEFAULT_SETTINGS.dialogTheme,
+      (value) => this._applySettingsPatch({ dialogTheme: value })
+    );
+    themeField
+      .querySelector(".phg-settings-item__info")
+      ?.append(createEl("div", "phg-settings-item__hint", TEXT.themeHint));
+    const themeGroup = this._buildSettingsGroup(TEXT.sectionTheme, [themeField]);
 
     // -- Preview Popup --
     const previewContainer = createEl("div", "phg-settings-group");
@@ -365,8 +436,54 @@ class HistoryDialog {
     );
     footer.append(resetBtn);
 
-    container.append(listGroup, previewGroup, footer);
+    container.append(captureGroup, listGroup, themeGroup, previewGroup, footer);
     return container;
+  }
+
+  _buildThemeField(label, themes, getValue, onChange) {
+    const item = createEl("div", "phg-settings-item phg-settings-item--col");
+    const header = createEl("div", "phg-settings-item__info");
+    header.append(createEl("div", "phg-settings-item__label", label));
+
+    const picker = createEl("div", "phg-theme-picker");
+    picker.setAttribute("role", "radiogroup");
+    picker.setAttribute("aria-label", label);
+
+    const current = getValue();
+    this.themeInputs = themes.map((theme) => {
+      const input = document.createElement("input");
+      input.type = "radio";
+      input.name = "phg-dialog-theme";
+      input.className = "phg-theme-input";
+      input.value = theme.value;
+      input.checked = theme.value === current;
+      input.setAttribute("aria-label", theme.label);
+      input.addEventListener("change", () => {
+        if (input.checked) onChange(theme.value);
+      });
+
+      const swatch = createEl("label", "phg-theme-swatch");
+      swatch.title = theme.label;
+      swatch.style.setProperty("--phg-swatch-from", theme.from);
+      swatch.style.setProperty("--phg-swatch-to", theme.to);
+      swatch.style.setProperty("--phg-swatch-accent", theme.accent);
+      swatch.append(input, createEl("span", "phg-theme-swatch__dot"));
+
+      picker.append(swatch);
+      return input;
+    });
+
+    item.append(header, picker);
+    return item;
+  }
+
+  _applyDialogTheme() {
+    const variables = dialogThemeVariables(this.settingsState?.dialogTheme);
+    const style = document.documentElement?.style;
+    if (!style) return;
+    for (const [name, value] of Object.entries(variables)) {
+      style.setProperty(name, value);
+    }
   }
 
   _buildSettingsGroup(title, items) {
@@ -521,6 +638,11 @@ class HistoryDialog {
       this.highlightRatioInput.disabled = state.highlightUsage === false;
     }
 
+    // Toggle: Capture History
+    if (this.captureHistoryToggleInput) {
+      this.captureHistoryToggleInput.checked = state.captureHistory !== false;
+    }
+
     // Toggle: Preview
     if (this.previewToggleInput) {
       const isEnabled = state.enabled !== false;
@@ -568,13 +690,23 @@ class HistoryDialog {
       this.portraitInput.value = String(val);
       if (this.portraitInputDisplay) this.portraitInputDisplay.textContent = `${val}%`;
     }
+
+    // Theme: Dialog Appearance
+    if (this.themeInputs?.length) {
+      const active = state.dialogTheme ?? DEFAULT_SETTINGS.dialogTheme;
+      for (const input of this.themeInputs) {
+        input.checked = input.value === active;
+      }
+    }
+    this._applyDialogTheme();
+
+    this._syncCaptureHistory();
   }
 
   _buildLayout() {
-    this.backdrop = createEl("div", "phg-dialog-backdrop phg-hidden");
-    this.backdrop.dataset.phg = "history";
-
-    this.dialog = createEl("div", "phg-dialog");
+    this.dialog = createEl("dialog", "phg-dialog");
+    this.dialog.dataset.phg = "history";
+    this.dialog.tabIndex = -1;
 
     const header = createEl("header", "phg-dialog__header");
 
@@ -624,7 +756,9 @@ class HistoryDialog {
     this.statusEl = createEl("div", "phg-dialog__status");
     this.searchRow = this._buildSearchRow();
     this.listEl = createEl("div", "phg-history-list");
-    this.historyView.append(this.statusEl, this.searchRow, this.listEl);
+    // Kept outside the scroll container so it stays pinned while the list scrolls.
+    this.paginationEl = this._buildPagination();
+    this.historyView.append(this.statusEl, this.searchRow, this.listEl, this.paginationEl);
 
     this.settingsView = this._buildSettingsView();
 
@@ -633,20 +767,25 @@ class HistoryDialog {
     body.append(this.historyView, this.settingsView);
 
     this.dialog.append(header, body);
-    this.backdrop.appendChild(this.dialog);
-    document.body.appendChild(this.backdrop);
+    document.body.appendChild(this.dialog);
 
-    this.backdrop.addEventListener("click", (event) => {
-      if (event.target === this.backdrop) {
+    this.dialog.addEventListener("click", (event) => {
+      if (event.target === this.dialog && this._isBackdropClick(event)) {
         this.close();
       }
     });
 
-    document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" && this.state.isOpen) {
-        this.close();
-      }
-    });
+    this.dialog.addEventListener("close", () => this._handleClosed());
+  }
+
+  _isBackdropClick(event) {
+    const rect = this.dialog.getBoundingClientRect();
+    return (
+      event.clientX <= rect.left ||
+      event.clientX >= rect.right ||
+      event.clientY <= rect.top ||
+      event.clientY >= rect.bottom
+    );
   }
 
   _createButton(label, title, onClick, variant = "primary") {
@@ -694,7 +833,8 @@ class HistoryDialog {
     input.value = this.state.searchQuery;
     input.addEventListener("input", () => {
       this.state.searchQuery = input.value;
-      this._renderEntries();
+      this.state.page = 1;
+      this._scheduleSearchRender();
     });
 
     const modeBtn = this._createButton(
@@ -705,6 +845,7 @@ class HistoryDialog {
         modeBtn.textContent = this.state.searchMode.toUpperCase();
         modeBtn.title = this.state.searchMode === "and" ? TEXT.searchModeAnd : TEXT.searchModeOr;
         modeBtn.setAttribute("aria-pressed", this.state.searchMode === "or");
+        this.state.page = 1;
         this._renderEntries();
       },
       "ghost"
@@ -718,6 +859,7 @@ class HistoryDialog {
       () => {
         input.value = "";
         this.state.searchQuery = "";
+        this.state.page = 1;
         this._renderEntries();
         input.focus();
       },
@@ -756,9 +898,22 @@ class HistoryDialog {
       return box;
     }
     const img = createEl("img");
-    img.src = preview.thumb ?? preview.url;
+    const thumbSrc = preview.thumb ?? preview.url;
+    img.src = thumbSrc;
     img.alt = preview.title ?? "Generated image";
     img.loading = "lazy";
+    img.decoding = "async";
+    // The thumbnail endpoint may 404 (unsupported format, missing file, older
+    // server); fall back to the full-size /view URL rather than a broken image.
+    if (preview.url && preview.thumb && preview.thumb !== preview.url) {
+      img.addEventListener(
+        "error",
+        () => {
+          img.src = preview.url;
+        },
+        { once: true }
+      );
+    }
     img.addEventListener("click", (event) => {
       event.stopPropagation();
       this._openGallery(entry, sources.length - 1);
@@ -767,16 +922,32 @@ class HistoryDialog {
     return box;
   }
 
-  _buildPrompt(text) {
+  _buildPrompt(entry) {
     const container = createEl("div", "phg-entry-card__prompt");
+    const negative = String(entry?.negative_prompt ?? "");
+    container.append(this._buildPromptBlock(null, entry?.prompt));
+
+    if (negative) {
+      container.append(this._buildPromptBlock(TEXT.promptNegativeTag, negative));
+    }
+
+    return container;
+  }
+
+  _buildPromptBlock(tag, text) {
+    const block = createEl("div", "phg-prompt__block");
+    if (tag) {
+      block.append(createEl("span", "phg-prompt__tag", tag));
+    }
+
     const pre = createEl("pre");
     pre.textContent = text ?? "";
 
     // Make focusable so we can intercept events.
     pre.tabIndex = 0;
 
-    container.append(pre);
-    return container;
+    block.append(pre);
+    return block;
   }
 
   _dialogHasFocus() {
@@ -894,8 +1065,58 @@ class HistoryDialog {
     }
   }
 
+  _buildPagination() {
+    const bar = createEl("div", "phg-pagination phg-hidden");
+    this.pageInfoEl = createEl("div", "phg-pagination__label");
+    this.prevPageBtn = this._createButton(
+      TEXT.pagePrev,
+      TEXT.pagePrev,
+      () => this._setPage(this.state.page - 1),
+      "ghost"
+    );
+    this.nextPageBtn = this._createButton(
+      TEXT.pageNext,
+      TEXT.pageNext,
+      () => this._setPage(this.state.page + 1),
+      "ghost"
+    );
+    bar.append(this.prevPageBtn, this.pageInfoEl, this.nextPageBtn);
+    return bar;
+  }
+
+  _setPage(page) {
+    const next = Math.max(1, Math.floor(Number(page)) || 1);
+    if (next === this.state.page) return;
+    this.state.page = next;
+    this._renderEntries();
+    this.listEl.scrollTop = 0;
+  }
+
+  _updatePagination(totalPages) {
+    if (!this.paginationEl) return;
+    if (totalPages <= 1) {
+      this.paginationEl.classList.add("phg-hidden");
+      return;
+    }
+    this.paginationEl.classList.remove("phg-hidden");
+    this.pageInfoEl.textContent = TEXT.pageLabel(this.state.page, totalPages);
+    this.prevPageBtn.disabled = this.state.page <= 1;
+    this.nextPageBtn.disabled = this.state.page >= totalPages;
+  }
+
+  // Re-filtering the whole history and rebuilding cards on every keystroke is
+  // needlessly expensive; coalesce bursts of typing into a single render.
+  _scheduleSearchRender() {
+    if (this._searchTimer) clearTimeout(this._searchTimer);
+    this._searchTimer = setTimeout(() => {
+      this._searchTimer = null;
+      this._renderEntries();
+    }, SEARCH_DEBOUNCE_MS);
+  }
+
   _renderEntries() {
     this.listEl.innerHTML = "";
+    if (this.paginationEl) this.paginationEl.classList.add("phg-hidden");
 
     const entries = this._filterEntries(this.state.entries);
 
@@ -918,6 +1139,11 @@ class HistoryDialog {
       this.listEl.appendChild(this._renderMessage(TEXT.empty, "muted"));
       return;
     }
+
+    // Stats below are computed over every filtered entry so highlighting and
+    // search stay global; only the rendered slice is paginated.
+    const totalPages = Math.max(1, Math.ceil(entries.length / PAGE_SIZE));
+    this.state.page = clamp(this.state.page, 1, totalPages);
 
     const preparedEntries = entries.map((entry) => {
       const sources = buildImageSources(entry, this.api);
@@ -949,7 +1175,8 @@ class HistoryDialog {
     const fullGlowAt =
       maxImages > 1 ? Math.max(startCount + 1, Math.round(maxImages * ratio)) : null;
 
-    for (const item of preparedEntries) {
+    const pageStart = (this.state.page - 1) * PAGE_SIZE;
+    for (const item of preparedEntries.slice(pageStart, pageStart + PAGE_SIZE)) {
       const highlight =
         highlightEnabled && maxImages >= startCount && item.imageCount >= startCount;
 
@@ -973,6 +1200,8 @@ class HistoryDialog {
         })
       );
     }
+
+    this._updatePagination(totalPages);
   }
 
   _renderMessage(text, tone = "") {
@@ -994,7 +1223,9 @@ class HistoryDialog {
     const isOrMode = this.state.searchMode === "or";
     return entries.filter((entry) => {
       const promptText = String(entry.prompt ?? "").toLowerCase();
-      const matchesTerm = (term) => promptText.includes(term);
+      const negativeText = String(entry.negative_prompt ?? "").toLowerCase();
+      const haystack = negativeText ? `${promptText}\n${negativeText}` : promptText;
+      const matchesTerm = (term) => haystack.includes(term);
       return isOrMode ? terms.some(matchesTerm) : terms.every(matchesTerm);
     });
   }
@@ -1046,7 +1277,7 @@ class HistoryDialog {
     header.append(stamp, badges, this._buildActions(entry, sources));
 
     const body = createEl("div", "phg-entry-card__body");
-    body.append(this._buildPreview(preview, entry, sources), this._buildPrompt(entry.prompt));
+    body.append(this._buildPreview(preview, entry, sources), this._buildPrompt(entry));
 
     const metaRow = createEl("div", "phg-entry-card__footer");
 
@@ -1125,6 +1356,15 @@ class HistoryDialog {
     }
 
     const updated = applyPromptToWidget(node, widget, entry.prompt ?? "");
+
+    const negativeText = String(entry.negative_prompt ?? "");
+    if (negativeText) {
+      const negativeWidget = resolveNegativeWidget(node);
+      if (negativeWidget) {
+        applyPromptToWidget(node, negativeWidget, negativeText);
+      }
+    }
+
     // Update target to point to where we actually sent it, so the UI reflects it?
     // The requirement doesn't explicitly say we must update the "Sending to: ..." label permanently,
     // but it's good UX to show where it went.
@@ -1156,6 +1396,7 @@ class HistoryDialog {
       await this.historyApi.remove(entry.id);
       this.state.entries = this.state.entries.filter((item) => item.id !== entry.id);
       this.viewer.close();
+      // _renderEntries() clamps the page, so emptying the last page steps back.
       this._renderEntries();
       this._setMessage(TEXT.deleteSuccess, "success");
     } catch (error) {
@@ -1232,6 +1473,13 @@ function attachUpdateListeners(api, eventBus) {
   listenersAttached = true;
 }
 
+function isHistoryNodeType(name, title) {
+  const matched = HISTORY_NODE_TYPES.some(
+    (type) => name === type || (typeof name === "string" && name.endsWith(type))
+  );
+  return matched || HISTORY_NODE_TITLES.has(title);
+}
+
 function attachHistoryButton(node) {
   if (!node || typeof node.addWidget !== "function") return;
   const existing = Array.isArray(node.widgets)
@@ -1260,6 +1508,11 @@ function attachHistoryButton(node) {
   }
 }
 
+function decorateNode(node) {
+  attachHistoryButton(node);
+  if (isDualInputNode(node)) attachDualInputSplitter(node);
+}
+
 function registerExtension() {
   logInfo(LOGGER, "loading");
   const comfyApp = resolveComfyApp();
@@ -1273,11 +1526,11 @@ function registerExtension() {
         attachUpdateListeners(comfyApi, comfyApp?.eventBus ?? null);
       },
       beforeRegisterNodeDef(nodeType, nodeData) {
-        if (nodeData?.name !== "PromptHistoryInput") return;
+        if (!isHistoryNodeType(nodeData?.name, nodeData?.title)) return;
         const onCreated = nodeType.prototype.onNodeCreated;
         nodeType.prototype.onNodeCreated = function (...args) {
           const result = onCreated?.apply(this, args);
-          attachHistoryButton(this);
+          decorateNode(this);
           return result;
         };
       },
@@ -1292,11 +1545,11 @@ function registerExtension() {
   if (originalRegisterNode) {
     window.LiteGraph.registerNodeType = function (type, nodeType) {
       originalRegisterNode.call(window.LiteGraph, type, nodeType);
-      if (nodeType?.title === "Prompt History Input" || type?.endsWith("PromptHistoryInput")) {
+      if (isHistoryNodeType(type, nodeType?.title)) {
         const onCreated = nodeType.prototype.onNodeCreated;
         nodeType.prototype.onNodeCreated = function (...args) {
           const res = onCreated?.apply(this, args);
-          attachHistoryButton(this);
+          decorateNode(this);
           return res;
         };
       }

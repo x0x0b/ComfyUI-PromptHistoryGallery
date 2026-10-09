@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from .normalizers import normalize_output_payload
 from .registry import consume_prompt_entries
+from .settings import is_capture_enabled
 from .storage import get_prompt_history_storage
 
 LOGGER = logging.getLogger(__name__)
@@ -44,21 +45,25 @@ def _extract_generated_files(history_result: Any) -> List[Dict[str, Any]]:
     return collected
 
 
-def _extract_prompt_texts(prompt_payload: Any) -> List[str]:
+def _extract_prompt_pairs(prompt_payload: Any) -> List[Tuple[str, str]]:
     if not isinstance(prompt_payload, dict):
         return []
-    prompts: List[str] = []
+    pairs: List[Tuple[str, str]] = []
     for node in prompt_payload.values():
         if not isinstance(node, dict):
             continue
-        if node.get("class_type") != "PromptHistoryInput":
+        class_type = node.get("class_type")
+        if class_type not in ("PromptHistoryInput", "PromptHistoryDualInput"):
             continue
         inputs = node.get("inputs", {})
-        if isinstance(inputs, dict):
-            prompt_value = inputs.get("prompt")
-            if isinstance(prompt_value, str) and prompt_value:
-                prompts.append(prompt_value)
-    return prompts
+        if not isinstance(inputs, dict):
+            continue
+        prompt_value = inputs.get("prompt")
+        if not isinstance(prompt_value, str) or not prompt_value:
+            continue
+        negative_value = inputs.get("negative_prompt")
+        pairs.append((prompt_value, negative_value if isinstance(negative_value, str) else ""))
+    return pairs
 
 
 def _resolve_entry_ids(
@@ -73,12 +78,11 @@ def _resolve_entry_ids(
     if entry_ids:
         return entry_ids
 
-    prompt_texts = _extract_prompt_texts(prompt_payload)
-    if not prompt_texts:
+    pairs = _extract_prompt_pairs(prompt_payload)
+    if not pairs:
         return []
 
-    resolved = storage.find_entry_ids_for_prompts(prompt_texts)
-    return list(resolved.values())
+    return storage.find_entry_ids_for_prompt_pairs(pairs)
 
 
 def _notify_clients(
@@ -107,10 +111,8 @@ def handle_prompt_completion(
     if not entry_ids:
         return
 
-    # Store the full prompt payload in metadata for later use
-    if prompt_payload:
-        for entry_id in entry_ids:
-            storage.update_metadata(entry_id, {"comfyui_prompt": prompt_payload})
+    if not is_capture_enabled():
+        return
 
     files = _extract_generated_files(history_result)
     if files:

@@ -1,6 +1,13 @@
 export function extractMetadata(entry) {
   if (!entry) return {};
 
+  // The server pre-extracts these fields so the list response does not have to
+  // carry the whole workflow payload. Older servers omit it, hence the fallback.
+  const compact = entry.metadata?.comfyui_params;
+  if (compact && typeof compact === "object" && !Array.isArray(compact)) {
+    return { ...compact };
+  }
+
   const params = {};
 
   let promptData = null;

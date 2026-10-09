@@ -60,5 +60,13 @@ export function createHistoryApi(api) {
         method: "DELETE",
       });
     },
+
+    async updateSettings(payload) {
+      await request("/prompt-history/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+    },
   };
 }
